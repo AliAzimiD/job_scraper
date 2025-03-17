@@ -1,4 +1,17 @@
-# Use Python 3.11-slim as a lightweight base image
+# Build stage
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+COPY requirements.txt .
+
+# Install build dependencies and compile Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && pip install --no-cache-dir wheel \
+    && pip wheel --no-cache-dir -r requirements.txt -w /wheels
+
+# Final stage
 FROM python:3.11-slim
 
 # ARG to suppress tzdata interactive prompts (optional for Debian/Ubuntu-based images)
@@ -16,15 +29,9 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     TZ=UTC
 
-# Install minimal system dependencies:
-#  - build-essential & libpq-dev required for psycopg2 compilation
-#  - cron, tzdata, logrotate needed for scheduled tasks, logs
-#  - gosu for dropping privileges
+# Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
     postgresql-client \
-    libpq-dev \
     cron \
     tzdata \
     logrotate \
@@ -38,20 +45,18 @@ RUN groupadd -r scraper && useradd -r -g scraper scraper -u 1000
 RUN mkdir -p /app/job_data/raw_data \
     /app/job_data/processed_data \
     /app/job_data/logs \
+    /app/job_data/state \
     /app/config \
     /app/health \
     && touch /app/job_data/logs/cron.log \
     && chown -R scraper:scraper /app \
     && chmod -R 755 /app/job_data
 
-# Copy requirements first for Docker layer caching
-COPY --chown=scraper:scraper requirements.txt .
-
-# Install Python dependencies
-# NOTE: We install flask & psutil for the health check service; remove 'requests'
-# if not strictly needed in the main application (health check uses 'curl').
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir flask psutil
+# Copy wheels from builder stage and install
+COPY --from=builder /wheels /wheels
+RUN pip install --no-cache-dir /wheels/* \
+    && pip install --no-cache-dir flask psutil \
+    && rm -rf /wheels
 
 # Configure log rotation for logs inside /app/job_data/logs
 RUN echo "/app/job_data/logs/*.log {\n\

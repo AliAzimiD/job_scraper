@@ -50,7 +50,7 @@ setup_logs() {
 start_health() {
     log "Starting health check Flask service on port 8081..."
     # Start the health service in the background.
-    python /app/health/app.py &
+    gosu scraper python /app/health/app.py &
     HEALTH_PID=$!
     log "Health check service started with PID=$HEALTH_PID"
 

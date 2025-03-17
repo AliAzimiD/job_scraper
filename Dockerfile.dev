@@ -1,0 +1,32 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    SCRAPER_ENV=development
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    postgresql-client \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+COPY requirements-dev.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir -r requirements-dev.txt
+
+# Create necessary directories
+RUN mkdir -p /app/job_data/raw_data \
+    /app/job_data/processed_data \
+    /app/job_data/logs \
+    /app/job_data/state
+
+# Expose ports for the application and debugger
+EXPOSE 8888 5678
+
+# Default command - can be overridden in docker-compose
+CMD ["python", "main.py"] 

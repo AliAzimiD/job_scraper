@@ -4,7 +4,7 @@ services:
   scraper:
     build: 
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     container_name: job_scraper_dev
     volumes:
       - .:/app
@@ -13,7 +13,38 @@ services:
       - SCRAPER_ENV=development
       - PYTHONPATH=/app
       - TZ=UTC
-    command: python main.py
+      - POSTGRES_HOST=db_dev
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=jobsdb_dev
+      - POSTGRES_USER=jobuser
+      - POSTGRES_PASSWORD=devpassword
+      - LOG_LEVEL=DEBUG
+    command: python -m debugpy --listen 0.0.0.0:5678 main.py
     ports:
-      - "8888:8888"  # For debugging if needed
-    restart: "no"
+      - "8888:8888"  # For web service
+      - "5678:5678"  # For remote debugging
+    depends_on:
+      - db_dev
+    networks:
+      - scraper-dev-network
+
+  db_dev:
+    image: postgres:15-alpine
+    container_name: job_db_dev
+    environment:
+      - POSTGRES_DB=jobsdb_dev
+      - POSTGRES_USER=jobuser
+      - POSTGRES_PASSWORD=devpassword
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # Different port to avoid conflicts with production
+    networks:
+      - scraper-dev-network
+
+volumes:
+  postgres_data_dev:
+
+networks:
+  scraper-dev-network:
+    driver: bridge

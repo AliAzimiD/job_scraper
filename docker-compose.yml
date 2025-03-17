@@ -5,10 +5,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
     container_name: job_scraper
     volumes:
-      - ./job_data:/app/job_data
-      - ./config:/app/config
+      - job_data:/app/job_data
+      - ./config:/app/config:ro
     environment:
       - SCRAPER_ENV=production
       - TZ=Asia/Tehran
@@ -20,6 +22,8 @@ services:
       - ENABLE_CRON=true
       - RUN_ON_START=true
       - LOG_LEVEL=INFO
+      - ENABLE_HEALTH_CHECK=true
+      - HEALTH_PORT=8081
     secrets:
       - db_password
     depends_on:
@@ -143,10 +147,15 @@ volumes:
     name: job_pgadmin_data
   superset_home:
     name: job_superset_home
+  job_data:
+    name: job_postgres_data
 
 networks:
   scraper-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
 
 secrets:
   db_password:
