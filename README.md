@@ -14,6 +14,7 @@ A modern, well-structured application for scraping job postings from various sou
 - **Robust error handling with retry logic and fallback mechanisms**
 - **Enhanced data validation for job entries**
 - **User-friendly configuration interface**
+- **Comprehensive monitoring with Prometheus and Grafana**
 - Comprehensive error handling and logging
 - Authentication for API endpoints
 - Containerized with Docker and Docker Compose
@@ -218,6 +219,30 @@ The application includes several mechanisms to ensure data integrity and operati
 - **Sample Data Preservation**: Problematic jobs are stored separately for debugging
 - **Detailed Logging**: Comprehensive logging of errors and operations
 - **Performance Metrics**: Tracking of processing time and success rates
+
+## Monitoring and Observability
+
+The application comes with a comprehensive monitoring stack based on Prometheus and Grafana:
+
+- **Real-time Metrics**: Job counts, error rates, API performance, and system resource usage
+- **Custom Dashboards**: Pre-configured Grafana dashboards for job scraper analytics
+- **Alerting**: Configurable alerts for error thresholds, service availability, and resource usage
+- **Multi-level Monitoring**: Application metrics, database metrics, Redis metrics, and system metrics
+- **Exporters**: PostgreSQL, Redis, and system metrics exporters included
+
+### Starting the Monitoring Stack
+
+```bash
+# Start the monitoring services
+./start_monitoring.sh
+```
+
+### Accessing Monitoring Dashboards
+
+- **Prometheus**: http://localhost:9090
+- **Grafana**: http://localhost:3000 (default credentials: admin/admin)
+
+For detailed information about the monitoring setup, see [MONITORING.md](MONITORING.md).
 
 ## Development
 

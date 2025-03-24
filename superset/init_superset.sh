@@ -4,9 +4,13 @@ set -e
 # Function to wait for database to be ready
 wait_for_db() {
     echo "Waiting for database to be ready..."
-    while ! nc -z "${DB_HOST:-postgres}" "${DB_PORT:-5432}"; do
-        sleep 0.5
+    
+    # Wait for the PostgreSQL database using pg_isready instead of netcat
+    until pg_isready -h "${DB_HOST:-db}" -p "${DB_PORT:-5432}" -U "${POSTGRES_USER:-jobuser}"; do
+        echo "PostgreSQL is unavailable - sleeping for 5 seconds"
+        sleep 5
     done
+    
     echo "Database is ready."
 }
 

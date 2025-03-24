@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+
+{% block title %}Search Jobs{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>Search Jobs</h1>
+
+    <div class="row">
+        <!-- Search Form -->
+        <div class="col-md-4">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Search Filters</h5>
+                </div>
+                <div class="card-body">
+                    <form id="searchForm" method="GET" action="{{ url_for('search_jobs') }}">
+                        <div class="mb-3">
+                            <label for="keyword" class="form-label">Keyword</label>
+                            <input type="text" class="form-control" id="keyword" name="keyword"
+                                value="{{ request.args.get('keyword', '') }}"
+                                placeholder="Job title, skills, company...">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="location" class="form-label">Location</label>
+                            <input type="text" class="form-control" id="location" name="location"
+                                value="{{ request.args.get('location', '') }}" placeholder="City, region...">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="company" class="form-label">Company</label>
+                            <input type="text" class="form-control" id="company" name="company"
+                                value="{{ request.args.get('company', '') }}" placeholder="Company name">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="days" class="form-label">Posted Within</label>
+                            <select class="form-control" id="days" name="days">
+                                <option value="">Any time</option>
+                                <option value="1" {% if request.args.get('days')=='1' %}selected{% endif %}>Last 24
+                                    hours</option>
+                                <option value="7" {% if request.args.get('days')=='7' %}selected{% endif %}>Last 7 days
+                                </option>
+                                <option value="30" {% if request.args.get('days')=='30' %}selected{% endif %}>Last 30
+                                    days</option>
+                                <option value="90" {% if request.args.get('days')=='90' %}selected{% endif %}>Last 3
+                                    months</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="sort" class="form-label">Sort By</label>
+                            <select class="form-control" id="sort" name="sort">
+                                <option value="date" {% if request.args.get('sort')=='date' %}selected{% endif %}>Date
+                                    (newest first)</option>
+                                <option value="relevance" {% if request.args.get('sort')=='relevance' %}selected{% endif
+                                    %}>Relevance</option>
+                                <option value="company" {% if request.args.get('sort')=='company' %}selected{% endif %}>
+                                    Company</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="limit" class="form-label">Results Per Page</label>
+                            <select class="form-control" id="limit" name="limit">
+                                <option value="10" {% if request.args.get('limit', '25' )=='10' %}selected{% endif %}>10
+                                </option>
+                                <option value="25" {% if request.args.get('limit', '25' )=='25' %}selected{% endif %}>25
+                                </option>
+                                <option value="50" {% if request.args.get('limit', '25' )=='50' %}selected{% endif %}>50
+                                </option>
+                                <option value="100" {% if request.args.get('limit', '25' )=='100' %}selected{% endif %}>
+                                    100</option>
+                            </select>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">Search</button>
+                        <button type="reset" class="btn btn-secondary">Reset</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Export Results -->
+            {% if total_jobs > 0 %}
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">Export Results</h5>
+                </div>
+                <div class="card-body">
+                    <p>Export these {{ total_jobs }} results:</p>
+                    <div class="d-grid gap-2">
+                        <a href="{{ url_for('export_search_results', format='csv') }}?{{ request.query_string.decode() }}"
+                            class="btn btn-outline-primary">
+                            <i class="fas fa-file-csv mr-2"></i> CSV
+                        </a>
+                        <a href="{{ url_for('export_search_results', format='json') }}?{{ request.query_string.decode() }}"
+                            class="btn btn-outline-primary">
+                            <i class="fas fa-file-code mr-2"></i> JSON
+                        </a>
+                        <a href="{{ url_for('export_search_results', format='excel') }}?{{ request.query_string.decode() }}"
+                            class="btn btn-outline-primary">
+                            <i class="fas fa-file-excel mr-2"></i> Excel
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Search Results -->
+        <div class="col-md-8">
+            {% if jobs %}
+            <div class="alert alert-info">
+                Found {{ total_jobs }} jobs. Showing page {{ page }} of {{ total_pages }}.
+            </div>
+
+            {% for job in jobs %}
+            <div class="card shadow-sm mb-3 job-card">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{{ url_for('job_details', job_id=job.id) }}">{{ job.title }}</a>
+                    </h5>
+                    <h6 class="card-subtitle mb-2 text-muted">
+                        {% if job.company_name_en %}
+                        {{ job.company_name_en }}
+                        {% elif job.company_name_fa %}
+                        {{ job.company_name_fa }}
+                        {% else %}
+                        Unknown Company
+                        {% endif %}
+                    </h6>
+
+                    <div class="job-meta mb-2">
+                        <span class="badge badge-info">
+                            <i class="fas fa-map-marker-alt mr-1"></i>
+                            {% if job.locations and job.locations|length > 0 %}
+                            {{ job.locations|join(', ') if job.locations is string else job.locations[0] }}
+                            {% else %}
+                            Not specified
+                            {% endif %}
+                        </span>
+
+                        {% if job.work_types and job.work_types|length > 0 %}
+                        <span class="badge badge-secondary">
+                            <i class="fas fa-briefcase mr-1"></i>
+                            {{ job.work_types|join(', ') if job.work_types is string else job.work_types[0] }}
+                        </span>
+                        {% endif %}
+
+                        {% if job.activation_time %}
+                        <span class="badge badge-primary">
+                            <i class="far fa-calendar-alt mr-1"></i>
+                            Posted {{ job.activation_time|datetime }}
+                        </span>
+                        {% endif %}
+                    </div>
+
+                    <p class="card-text">
+                        {% if job.description %}
+                        {{ job.description|truncate(150) }}
+                        {% else %}
+                        <em>No description available</em>
+                        {% endif %}
+                    </p>
+
+                    <a href="{{ job.url }}" class="btn btn-sm btn-outline-primary" target="_blank">
+                        <i class="fas fa-external-link-alt mr-1"></i>
+                        View Original
+                    </a>
+                    <a href="{{ url_for('job_details', job_id=job.id) }}" class="btn btn-sm btn-outline-secondary">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Details
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+
+            <!-- Pagination -->
+            {% if total_pages > 1 %}
+            <nav aria-label="Search results pagination">
+                <ul class="pagination justify-content-center">
+                    {% if page > 1 %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('search_jobs', page=page-1, **request.args) }}"
+                            aria-label="Previous">
+                            <span aria-hidden="true">&laquo;</span>
+                        </a>
+                    </li>
+                    {% endif %}
+
+                    {% for p in range(max(1, page-2), min(total_pages+1, page+3)) %}
+                    <li class="page-item {% if p == page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('search_jobs', page=p, **request.args) }}">{{ p }}</a>
+                    </li>
+                    {% endfor %}
+
+                    {% if page < total_pages %} <li class="page-item">
+                        <a class="page-link" href="{{ url_for('search_jobs', page=page+1, **request.args) }}"
+                            aria-label="Next">
+                            <span aria-hidden="true">&raquo;</span>
+                        </a>
+                        </li>
+                        {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+
+            {% elif request.args %}
+            <div class="alert alert-warning">
+                <h4 class="alert-heading">No results found!</h4>
+                <p>No jobs match your search criteria. Try broadening your search or using different keywords.</p>
+            </div>
+            {% else %}
+            <div class="card shadow-sm">
+                <div class="card-body text-center p-5">
+                    <h3 class="mb-4">Find Your Next Opportunity</h3>
+                    <p class="lead">Use the search filters to find jobs matching your skills and preferences.</p>
+                    <p>You can search by keyword, location, company name, and more.</p>
+                    <i class="fas fa-search fa-3x text-muted mb-3"></i>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    // Auto-submit when sort or limit changes
+    $(document).ready(function () {
+        $('#sort, #limit, #days').on('change', function () {
+            $('#searchForm').submit();
+        });
+
+        // Reset button should clear form and redirect to base search URL
+        $('button[type="reset"]').on('click', function (e) {
+            e.preventDefault();
+            window.location.href = "{{ url_for('search_jobs') }}";
+        });
+    });
+</script>
+{% endblock %}

@@ -1,32 +1,75 @@
-FROM python:3.11-slim
+FROM python:3.10.12-slim
 
 WORKDIR /app
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    SCRAPER_ENV=development
+# Add retry and timeout functionality for apt-get
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80retries && \
+    echo 'Acquire::http::Timeout "120";' > /etc/apt/apt.conf.d/99timeout && \
+    echo 'Acquire::https::Timeout "120";' >> /etc/apt/apt.conf.d/99timeout
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Use multiple mirrors for resilience
+RUN echo 'deb http://deb.debian.org/debian bullseye main' > /etc/apt/sources.list && \
+    echo 'deb http://security.debian.org/debian-security bullseye-security main' >> /etc/apt/sources.list && \
+    echo 'deb http://deb.debian.org/debian bullseye-updates main' >> /etc/apt/sources.list
+
+# Install system dependencies with fallback options
+RUN apt-get update || (sleep 10 && apt-get update) && \
+    apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    git \
     postgresql-client \
-    libpq-dev \
+    jq \
+    iputils-ping \
+    ca-certificates \
+    dnsutils \
+    netcat \
     && rm -rf /var/lib/apt/lists/*
 
+# Set up DNS configuration through environment variables instead of modifying resolv.conf
+ENV RES_OPTIONS="single-request timeout:5"
+
+# Set pip configuration for reliability
+ENV PIP_DEFAULT_TIMEOUT=100 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_RETRIES=5 \
+    SQLALCHEMY_SILENCE_UBER_WARNING=1
+
+# Test DNS resolution
+RUN echo "Testing DNS resolution..." && \
+    ping -c 1 -W 5 google.com || echo "DNS warning: Unable to ping google.com, but continuing..."
+
+# Copy requirements first to leverage Docker cache
 COPY requirements.txt .
-COPY requirements-dev.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir -r requirements-dev.txt
+# Install Python dependencies with retry and fallback to PyPI mirror if needed
+RUN pip install --retries 5 -r requirements.txt || \
+    pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple --retries 5 -r requirements.txt
 
-# Create necessary directories
-RUN mkdir -p /app/job_data/raw_data \
-    /app/job_data/processed_data \
-    /app/job_data/logs \
-    /app/job_data/state
+# Install additional development dependencies
+RUN pip install --retries 5 \
+    pytest \
+    pytest-asyncio \
+    pytest-cov \
+    black \
+    flake8 \
+    ipython \
+    flask-bootstrap \
+    requests
 
-# Expose ports for the application and debugger
-EXPOSE 8888 5678
+# Copy the application code
+COPY . .
 
-# Default command - can be overridden in docker-compose
-CMD ["python", "main.py"] 
+# Set Python path
+ENV PYTHONPATH=/app
+
+# Expose ports
+EXPOSE 8081 5000
+
+# Health check before starting
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD nc -z localhost 8081 || exit 1
+
+# Keep the container running
+CMD ["tail", "-f", "/dev/null"] 

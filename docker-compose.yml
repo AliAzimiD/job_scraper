@@ -29,8 +29,14 @@ services:
       - CONFIG_PATH=/app/config/app_config.yaml
     depends_on:
       - db
+    command: bash -c "cd /app && python -m src.web_app"
     networks:
       - job-scraper-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   db:
     image: postgres:14-alpine

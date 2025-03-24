@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Create Backup - Job Scraper{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Create Backup</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header bg-primary text-white">
+        <i class="fas fa-save mr-2"></i> Create New Backup
+    </div>
+    <div class="card-body">
+        <form action="{{ url_for('create_backup') }}" method="post">
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle"></i> 
+                Backups include the database data and optionally the raw data files.
+            </div>
+            
+            <div class="form-check mb-3">
+                <input type="checkbox" class="form-check-input" id="include_files" name="include_files" checked>
+                <label class="form-check-label" for="include_files">
+                    Include raw data files (increases backup size)
+                </label>
+            </div>
+            
+            <div class="form-check mb-3">
+                <input type="checkbox" class="form-check-input" id="password_protect" name="password_protect">
+                <label class="form-check-label" for="password_protect">
+                    Password protect backup
+                </label>
+            </div>
+            
+            <div class="form-group" id="password_section" style="display: none;">
+                <label for="password">Backup Password:</label>
+                <input type="password" class="form-control" id="password" name="password" placeholder="Enter a secure password">
+                <small class="form-text text-muted">
+                    You will need this password to restore from this backup.
+                </small>
+            </div>
+            
+            <div class="form-group">
+                <button type="submit" class="btn btn-primary" id="create-backup-btn">
+                    <i class="fas fa-save mr-1"></i> Create Backup
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header bg-primary text-white">
+        <i class="fas fa-question-circle mr-2"></i> About Backups
+    </div>
+    <div class="card-body">
+        <h5>What's included in backups?</h5>
+        <ul>
+            <li><strong>Database Export:</strong> A complete JSON export of all jobs in the database</li>
+            <li><strong>Metadata:</strong> Information about when the backup was created and what's included</li>
+            <li><strong>Raw Data (Optional):</strong> The original scraped data files</li>
+        </ul>
+        
+        <h5>Backup Storage</h5>
+        <p>
+            Backups are stored in the <code>backups</code> directory and can be downloaded or restored later.
+            Older backups are not automatically deleted, so you should periodically remove old backups
+            to save disk space.
+        </p>
+        
+        <h5>Recommended Backup Schedule</h5>
+        <ul>
+            <li><strong>Daily:</strong> For active scraping operations</li>
+            <li><strong>Weekly:</strong> For moderate scraping frequency</li>
+            <li><strong>Monthly:</strong> For minimal scraping activity</li>
+        </ul>
+        
+        <div class="alert alert-warning">
+            <i class="fas fa-exclamation-triangle"></i>
+            <strong>Warning:</strong> Creating backups with large raw data files may take significant time.
+            The page will reload once the backup is complete.
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // Show/hide password field based on password protection checkbox
+        $("#password_protect").change(function() {
+            if(this.checked) {
+                $("#password_section").slideDown();
+                $("#password").prop("required", true);
+            } else {
+                $("#password_section").slideUp();
+                $("#password").prop("required", false);
+            }
+        });
+        
+        // Show loading spinner when creating backup
+        $("#create-backup-btn").click(function() {
+            // Check if form is valid
+            if ($("form")[0].checkValidity()) {
+                // Create a spinner and overlay
+                const overlay = $('<div class="position-fixed d-flex justify-content-center align-items-center" style="top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 9999;"></div>');
+                const spinner = $('<div class="text-center text-white"><div class="spinner-border mb-3" style="width: 3rem; height: 3rem;" role="status"><span class="sr-only">Creating backup...</span></div><h5>Creating Backup...</h5><p>This may take a few minutes. Please wait.</p></div>');
+                
+                overlay.append(spinner);
+                $("body").append(overlay);
+            }
+        });
+    });
+</script>
+{% endblock %} 

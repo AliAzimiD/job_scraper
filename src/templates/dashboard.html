@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Job Scraper{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Dashboard</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <div class="btn-group mr-2">
+            <a href="{{ url_for('export_data') }}" class="btn btn-sm btn-outline-secondary">
+                <i class="fas fa-file-export"></i> Export
+            </a>
+            <a href="{{ url_for('import_data') }}" class="btn btn-sm btn-outline-secondary">
+                <i class="fas fa-file-import"></i> Import
+            </a>
+        </div>
+        <a href="{{ url_for('create_backup') }}" class="btn btn-sm btn-outline-primary">
+            <i class="fas fa-save"></i> Backup
+        </a>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="row">
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="icon">
+                <i class="fas fa-briefcase"></i>
+            </div>
+            <div class="number">{{ job_count }}</div>
+            <div class="label">Total Jobs</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="icon">
+                <i class="fas fa-calendar-day"></i>
+            </div>
+            <div class="number" id="jobs-today">-</div>
+            <div class="label">Jobs Today</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="icon">
+                <i class="fas fa-robot"></i>
+            </div>
+            <div class="number">{{ scraper_stats.total_jobs }}</div>
+            <div class="label">Last Scrape</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="icon">
+                <i class="fas fa-server"></i>
+            </div>
+            <div class="number">{{ backups|length }}</div>
+            <div class="label">Backups</div>
+        </div>
+    </div>
+</div>
+
+<!-- Main content area with 2-column layout -->
+<div class="row mt-4">
+    <!-- Left column - Jobs and Search -->
+    <div class="col-md-8">
+        <!-- Recent Jobs -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-list mr-2"></i> Recent Jobs</h5>
+            </div>
+            <div class="card-body">
+                {% if recent_jobs %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Company</th>
+                                <th>Date</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for job in recent_jobs %}
+                            <tr>
+                                <td>{{ job.title }}</td>
+                                <td>{{ job.company_name_en }}</td>
+                                <td>{{ job.activation_time }}</td>
+                                <td>
+                                    <a href="{{ job.url }}" target="_blank" class="btn btn-sm btn-outline-primary">
+                                        <i class="fas fa-external-link-alt"></i>
+                                    </a>
+                                    <a href="{{ url_for('job_details', job_id=job.id) }}"
+                                        class="btn btn-sm btn-outline-info">
+                                        <i class="fas fa-info-circle"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="alert alert-info">
+                    No jobs found. Start a scraper job to collect data.
+                </div>
+                {% endif %}
+            </div>
+            <div class="card-footer">
+                <a href="{{ url_for('search_jobs') }}" class="btn btn-primary btn-sm">
+                    <i class="fas fa-search mr-1"></i> Search All Jobs
+                </a>
+            </div>
+        </div>
+
+        <!-- Latest Backup -->
+        {% if backups %}
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-save mr-2"></i> Latest Backup</h5>
+            </div>
+            <div class="card-body">
+                <p><strong>Filename:</strong> {{ backups[0].filename }}</p>
+                <p><strong>Created:</strong> {{ backups[0].created_at }}</p>
+                <p><strong>Size:</strong> {{ backups[0].size_mb }} MB</p>
+                <div>
+                    <a href="{{ url_for('download_file', filename=backups[0].filename) }}"
+                        class="btn btn-sm btn-primary">
+                        <i class="fas fa-download mr-1"></i> Download
+                    </a>
+                    <a href="{{ url_for('restore_backup') }}" class="btn btn-sm btn-warning">
+                        <i class="fas fa-undo mr-1"></i> Restore
+                    </a>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Right column - Scraper status and quick search -->
+    <div class="col-md-4">
+        <!-- Quick Search Card -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-search mr-2"></i>Quick Search
+                </h5>
+            </div>
+            <div class="card-body">
+                <p>Search the job database for specific positions, companies, or locations.</p>
+
+                <form action="{{ url_for('search_jobs') }}" method="GET" class="mb-3">
+                    <div class="input-group">
+                        <input type="text" class="form-control" name="keyword" placeholder="Search for jobs...">
+                        <div class="input-group-append">
+                            <button class="btn btn-primary" type="submit">
+                                <i class="fas fa-search"></i> Search
+                            </button>
+                        </div>
+                    </div>
+                </form>
+
+                <div class="d-flex justify-content-between">
+                    <a href="{{ url_for('search_jobs') }}" class="btn btn-outline-secondary btn-sm">
+                        <i class="fas fa-filter mr-1"></i>Advanced Search
+                    </a>
+                    <a href="{{ url_for('search_jobs') }}?sort=date&days=1" class="btn btn-outline-info btn-sm">
+                        <i class="fas fa-clock mr-1"></i>Latest Jobs
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scraper Status -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-robot mr-2"></i> Scraper Status</h5>
+            </div>
+            <div class="card-body">
+                <h6>Current Status</h6>
+                <p>
+                    <strong>Status:</strong>
+                    <span
+                        class="badge {% if scraper_running %}badge-success{% elif scraper_stats.status == 'error' %}badge-danger{% else %}badge-secondary{% endif %}">
+                        {% if scraper_running %}Running{% else %}{{ scraper_stats.status|capitalize }}{% endif %}
+                    </span>
+                </p>
+                <p><strong>Total Jobs Scraped:</strong> {{ scraper_stats.total_jobs }}</p>
+                {% if scraper_stats.last_run %}
+                <p><strong>Last Run:</strong> {{ scraper_stats.last_run }}</p>
+                {% endif %}
+
+                <h6 class="mt-3">Start Scraper</h6>
+                <form action="{{ url_for('start_scrape') }}" method="post">
+                    <div class="form-group">
+                        <label for="max_pages">Max Pages to Scrape:</label>
+                        <input type="number" class="form-control" id="max_pages" name="max_pages" min="1" value="1">
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <button type="submit" class="btn btn-success btn-sm" {% if scraper_running %}disabled{% endif
+                            %}>
+                            <i class="fas fa-play mr-1"></i> Start Scraper
+                        </button>
+
+                        <a href="{{ url_for('stop_scrape') }}"
+                            class="btn btn-danger btn-sm {% if not scraper_running %}disabled{% endif %}"
+                            onclick="event.preventDefault(); document.getElementById('stop-form').submit();">
+                            <i class="fas fa-stop mr-1"></i> Stop Scraper
+                        </a>
+                    </div>
+                </form>
+                <form id="stop-form" action="{{ url_for('stop_scrape') }}" method="post" style="display: none;"></form>
+            </div>
+            <div class="card-footer">
+                <a href="{{ url_for('scraper_config') }}" class="btn btn-info btn-sm btn-block">
+                    <i class="fas fa-cogs mr-1"></i> Configure Scraper
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Calculate jobs today
+    $(document).ready(function () {
+        // Get today's date in ISO format (YYYY-MM-DD)
+        const today = new Date().toISOString().split('T')[0];
+
+        // Call API endpoint to get stats
+        $.getJSON('/api/stats', function (data) {
+            const jobsToday = data.jobs_by_date[today] || 0;
+            $('#jobs-today').text(jobsToday);
+        });
+    });
+</script>
+{% endblock %}

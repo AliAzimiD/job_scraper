@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Scraper Configuration{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>Scraper Configuration</h1>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Configure Scraper Settings</h5>
+        </div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('scraper_config') }}">
+                <div class="row">
+                    <!-- Request Configuration -->
+                    <div class="col-md-6">
+                        <h4>Request Settings</h4>
+                        <div class="mb-3">
+                            <label for="max_pages" class="form-label">Maximum Pages</label>
+                            <input type="number" class="form-control" id="max_pages" name="max_pages"
+                                value="{{ config.max_pages }}" min="1" max="100">
+                            <div class="form-text">Maximum number of pages to scrape per run</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="batch_size" class="form-label">Batch Size</label>
+                            <input type="number" class="form-control" id="batch_size" name="batch_size"
+                                value="{{ config.batch_size }}" min="10" max="200">
+                            <div class="form-text">Number of jobs to process in each batch</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="request_timeout" class="form-label">Request Timeout (seconds)</label>
+                            <input type="number" class="form-control" id="request_timeout" name="request_timeout"
+                                value="{{ config.request_timeout }}" min="5" max="120">
+                            <div class="form-text">How long to wait for API responses</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="user_agent" class="form-label">User Agent</label>
+                            <input type="text" class="form-control" id="user_agent" name="user_agent"
+                                value="{{ config.user_agent }}">
+                            <div class="form-text">Browser identification string to use in requests</div>
+                        </div>
+                    </div>
+
+                    <!-- Retry and Error Handling -->
+                    <div class="col-md-6">
+                        <h4>Retry & Error Handling</h4>
+                        <div class="mb-3">
+                            <label for="retry_count" class="form-label">API Retry Count</label>
+                            <input type="number" class="form-control" id="retry_count" name="retry_count"
+                                value="{{ config.retry_count }}" min="0" max="10">
+                            <div class="form-text">Number of times to retry failed API requests</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="retry_delay" class="form-label">Retry Delay (seconds)</label>
+                            <input type="number" class="form-control" id="retry_delay" name="retry_delay"
+                                value="{{ config.retry_delay }}" min="1" max="60">
+                            <div class="form-text">Seconds to wait between retries</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="db_retries" class="form-label">Database Retry Count</label>
+                            <input type="number" class="form-control" id="db_retries" name="db_retries"
+                                value="{{ config.db_retries }}" min="0" max="5">
+                            <div class="form-text">Number of times to retry database operations</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="failure_threshold" class="form-label">Failure Threshold</label>
+                            <input type="number" class="form-control" id="failure_threshold" name="failure_threshold"
+                                value="{{ config.failure_threshold }}" min="1" max="50">
+                            <div class="form-text">Maximum number of failures before stopping the scraper</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Storage Options -->
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <h4>Storage Options</h4>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="save_raw_data" name="save_raw_data"
+                                value="true" {% if config.save_raw_data %}checked{% endif %}>
+                            <label class="form-check-label" for="save_raw_data">Save Raw Data Files</label>
+                            <div class="form-text">Store raw JSON responses for debugging and analysis</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4">
+                    <button type="submit" class="btn btn-primary">Save Configuration</button>
+                    <a href="{{ url_for('scraper_status') }}" class="btn btn-secondary">Back to Scraper</a>
+                </div>
+
+                {% if config.last_updated %}
+                <div class="mt-3 text-muted">
+                    <small>Last updated: {{ config.last_updated }}</small>
+                </div>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-header bg-info text-white">
+            <h5 class="mb-0">Configuration Help</h5>
+        </div>
+        <div class="card-body">
+            <h5>Tips for optimal configuration:</h5>
+            <ul>
+                <li><strong>Maximum Pages:</strong> Higher values scrape more jobs but take longer to complete.</li>
+                <li><strong>Batch Size:</strong> Larger batches are more efficient but use more memory.</li>
+                <li><strong>Retry Settings:</strong> Increase retry counts in unstable network environments.</li>
+                <li><strong>User Agent:</strong> Use a modern browser user agent to avoid being blocked.</li>
+                <li><strong>Failure Threshold:</strong> Set higher in development, lower in production.</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

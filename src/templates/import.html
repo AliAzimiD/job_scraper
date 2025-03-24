@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Import Data - Job Scraper{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Import Data</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header bg-primary text-white">
+        <i class="fas fa-file-import mr-2"></i> Import Job Data
+    </div>
+    <div class="card-body">
+        <form action="{{ url_for('import_data') }}" method="post" enctype="multipart/form-data">
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle"></i> Supported file formats: 
+                <strong>JSON</strong>, <strong>CSV</strong>, <strong>Parquet</strong> 
+                (including compressed files with .zip or .gz extensions)
+            </div>
+            
+            <div class="form-group">
+                <label for="file">Select Data File:</label>
+                <div class="custom-file">
+                    <input type="file" class="custom-file-input" id="file" name="file" required>
+                    <label class="custom-file-label" for="file">Choose file...</label>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="batch_size">Batch Size:</label>
+                <input type="number" class="form-control" id="batch_size" name="batch_size" min="100" max="5000" value="1000">
+                <small class="form-text text-muted">
+                    Number of records to process at once. Smaller batches use less memory but are slower.
+                </small>
+            </div>
+            
+            <div class="form-check mb-3">
+                <input type="checkbox" class="form-check-input" id="update_existing" name="update_existing" checked>
+                <label class="form-check-label" for="update_existing">
+                    Update existing records (if job ID already exists)
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-file-import mr-1"></i> Import Data
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header bg-primary text-white">
+        <i class="fas fa-info-circle mr-2"></i> Import Guidelines
+    </div>
+    <div class="card-body">
+        <h5>File Format Requirements</h5>
+        <ul>
+            <li>
+                <strong>JSON</strong>: File must contain an array of job objects, with each job having at minimum 
+                an "id" field and a "title" field.
+            </li>
+            <li>
+                <strong>CSV</strong>: File must have headers matching the database fields. At minimum, "id" 
+                and "title" columns are required.
+            </li>
+            <li>
+                <strong>Parquet</strong>: File must contain job data with schema matching the database fields.
+            </li>
+        </ul>
+        
+        <h5>Validation & Processing</h5>
+        <p>
+            During import, the system will perform the following operations:
+        </p>
+        <ul>
+            <li>Validate that required fields are present</li>
+            <li>Normalize text fields (trimming whitespace, etc.)</li>
+            <li>Convert date fields to proper format</li>
+            <li>Check for duplicate job IDs</li>
+            <li>Validate data types and formats</li>
+        </ul>
+        
+        <div class="alert alert-warning">
+            <i class="fas fa-exclamation-triangle"></i>
+            <strong>Warning:</strong> Large imports may take significant time to process. 
+            The page will reload once the import is complete.
+        </div>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header bg-primary text-white">
+        <i class="fas fa-history mr-2"></i> Recent Imports
+    </div>
+    <div class="card-body">
+        <div id="recent-imports">
+            <div class="d-flex justify-content-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // File input prettification
+        $(".custom-file-input").on("change", function() {
+            var fileName = $(this).val().split("\\").pop();
+            $(this).siblings(".custom-file-label").addClass("selected").html(fileName);
+        });
+        
+        // Load recent imports
+        fetch('/api/stats')
+            .then(response => response.json())
+            .then(data => {
+                const recentImportsDiv = document.getElementById('recent-imports');
+                
+                // Check if there are imports
+                if (data.last_import) {
+                    const importTable = document.createElement('table');
+                    importTable.className = 'table table-hover';
+                    
+                    // Create table header
+                    const thead = document.createElement('thead');
+                    thead.innerHTML = `
+                        <tr>
+                            <th>Date</th>
+                            <th>Imports Count</th>
+                        </tr>
+                    `;
+                    importTable.appendChild(thead);
+                    
+                    // Create table body
+                    const tbody = document.createElement('tbody');
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${new Date(data.last_import).toLocaleString()}</td>
+                        <td>${data.imports || 0}</td>
+                    `;
+                    tbody.appendChild(row);
+                    importTable.appendChild(tbody);
+                    
+                    // Replace loading spinner with table
+                    recentImportsDiv.innerHTML = '';
+                    recentImportsDiv.appendChild(importTable);
+                } else {
+                    recentImportsDiv.innerHTML = '<div class="alert alert-info">No recent imports found.</div>';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching import stats:', error);
+                document.getElementById('recent-imports').innerHTML = 
+                    '<div class="alert alert-danger">Error loading recent imports.</div>';
+            });
+    });
+</script>
+{% endblock %} 

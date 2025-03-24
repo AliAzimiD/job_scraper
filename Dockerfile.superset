@@ -5,12 +5,21 @@ FROM apache/superset:latest
 # Switch to root to install additional packages
 USER root
 
-# Install PostgreSQL drivers and other dependencies
+# Install PostgreSQL client and other dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    postgresql-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 RUN pip install --no-cache-dir \
     psycopg2-binary \
     sqlalchemy-utils \
     pandas==1.5.3 \
-    sqlalchemy==1.4.48
+    sqlalchemy==1.4.48 \
+    flask-cors \
+    gevent
 
 # Add required environment variables
 ENV PYTHONPATH=/app/pythonpath

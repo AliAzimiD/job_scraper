@@ -233,3 +233,44 @@ class ConfigManager:
 
         except Exception as e:
             logger.error(f"Error updating config: {str(e)}")
+
+    def update_scraper_config(self, new_config: Dict[str, Any]) -> bool:
+        """
+        Update the entire scraper configuration section with new values.
+        
+        Args:
+            new_config (Dict[str, Any]): New scraper configuration dictionary
+            
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        try:
+            # Validate essential configuration parameters
+            for required_key in ['max_pages', 'batch_size']:
+                if required_key not in new_config:
+                    logger.warning(f"Required scraper config key missing: {required_key}")
+                    return False
+            
+            # Update timestamp
+            new_config['last_updated'] = datetime.now().isoformat()
+            
+            # Load current full config
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            
+            # Update scraper section
+            config['scraper'] = new_config
+            
+            # Write updated config back to file
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                yaml.dump(config, f, default_flow_style=False)
+            
+            # Reload config to ensure changes are in memory
+            self._load_config()
+            
+            logger.info("Scraper configuration updated successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating scraper configuration: {str(e)}")
+            return False

@@ -1,0 +1,65 @@
+groups:
+- name: job_scraper_alerts
+  rules:
+  - alert: JobScraperDown
+    expr: up{job="job-scraper-web"} == 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Job Scraper application is down"
+      description: "The Job Scraper web application has been down for more than 5 minutes."
+
+  - alert: HighErrorRate
+    expr: sum(increase(job_scraper_errors_total[1h])) > 10
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High error rate in Job Scraper"
+      description: "Job Scraper has experienced more than 10 errors in the last hour."
+
+  - alert: NoNewJobs
+    expr: increase(job_scraper_new_jobs_total[24h]) == 0
+    for: 1h
+    labels:
+      severity: warning
+    annotations:
+      summary: "No new jobs collected"
+      description: "Job Scraper hasn't collected any new jobs in the last 24 hours."
+
+  - alert: DatabaseDown
+    expr: up{job="postgres-exporter"} == 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "PostgreSQL database is down"
+      description: "The PostgreSQL database has been down for more than 5 minutes."
+
+  - alert: RedisDown
+    expr: up{job="redis-exporter"} == 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Redis server is down"
+      description: "The Redis server has been down for more than 5 minutes."
+
+  - alert: HighCPUUsage
+    expr: job_scraper_cpu_usage > 0.8
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High CPU usage in Job Scraper"
+      description: "Job Scraper's CPU usage has been above 80% for more than 10 minutes."
+
+  - alert: HighMemoryUsage
+    expr: job_scraper_memory_usage_bytes / (1024 * 1024 * 1024) > 2
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High memory usage in Job Scraper"
+      description: "Job Scraper's memory usage has been above 2GB for more than 10 minutes." 

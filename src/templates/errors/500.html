@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Server Error{% endblock %}
+
+{% block content %}
+<div class="error-container text-center">
+    <div class="error-code mt-5">500</div>
+    <h1 class="mt-4">Server Error</h1>
+
+    <div class="error-details my-4">
+        <p>Something went wrong on our servers. We're working to fix the problem.</p>
+
+        {% if error_message %}
+        <div class="alert alert-danger">
+            {{ error_message }}
+        </div>
+        {% endif %}
+
+        {% if config.DEBUG and error_traceback %}
+        <div class="card mt-4">
+            <div class="card-header bg-danger text-white">
+                <h5 class="my-0">Error Details (Debug Mode)</h5>
+            </div>
+            <div class="card-body">
+                <pre class="error-traceback text-left">{{ error_traceback }}</pre>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="error-actions my-5">
+        <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary">
+            <i class="fas fa-home mr-2"></i> Go to Dashboard
+        </a>
+        <button onclick="window.location.reload()" class="btn btn-outline-secondary ml-2">
+            <i class="fas fa-sync-alt mr-2"></i> Try Again
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block styles %}
+{{ super() }}
+<style>
+    .error-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+
+    .error-code {
+        font-size: 8rem;
+        font-weight: bold;
+        color: #f8f9fa;
+        text-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        background: linear-gradient(45deg, #dc3545, #fd7e14);
+        -webkit-background-clip: text;
+        background-clip: text;
+    }
+
+    .error-details {
+        color: #6c757d;
+        font-size: 1.2rem;
+    }
+
+    .error-traceback {
+        font-size: 0.8rem;
+        max-height: 300px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+    }
+
+    .error-actions {
+        margin-top: 2rem;
+    }
+</style>
+{% endblock %}

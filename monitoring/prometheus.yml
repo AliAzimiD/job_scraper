@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'job_scraper'
+    static_configs:
+      - targets: ['scraper:8081']

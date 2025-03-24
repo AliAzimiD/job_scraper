@@ -7,6 +7,7 @@ import zipfile
 import threading
 import yaml
 import io
+import time
 
 from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, flash
 from flask_bootstrap import Bootstrap
@@ -22,6 +23,7 @@ from .scraper import JobScraper
 from .log_setup import get_logger
 from .config_manager import ConfigManager
 from .filters import register_filters
+from .monitoring import setup_monitoring, TOTAL_JOBS, NEW_JOBS, ERRORS, RETRIES
 
 # Configure logger
 logger = get_logger("web_app")
@@ -203,6 +205,14 @@ class JobScraperWebApp:
         # Initialize components in a synchronous context
         self._initialize_managers_sync()
         
+        # Initialize monitoring
+        setup_monitoring(
+            self.app, 
+            version=os.environ.get("APP_VERSION", "0.1.0"),
+            config_name=os.path.basename(self.config_path),
+            env=os.environ.get("FLASK_ENV", "production")
+        )
+        
         # Run the Flask app
         self.app.run(host=host, port=port, debug=debug)
         
@@ -227,10 +237,13 @@ class JobScraperWebApp:
                 result = cursor.fetchone()
                 if result:
                     job_count = result[0]
+                    # Update Prometheus metric
+                    TOTAL_JOBS.set(job_count)
                 cursor.close()
                 conn.close()
             except Exception as e:
                 logger.error(f"Error getting job count: {e}")
+                ERRORS.labels(type="database").inc()
         
         # Get scraper stats
         scraper_stats = {
@@ -272,233 +285,72 @@ class JobScraperWebApp:
         )
         
     def start_scrape(self):
-        """Start a scraping job."""
+        """Start the job scraper."""
         if self.scraper_running:
-            flash("Scraper is already running", "warning")
+            flash("Scraper is already running.", "warning")
             return redirect(url_for('dashboard'))
+        
+        try:
+            # Initialize components if not already done
+            if not self.db_manager or not self.data_manager:
+                self._initialize_managers_sync()
             
-        # Get form parameters
-        max_pages = request.form.get('max_pages', type=int, default=1)
-        
-        # Start scraper in a separate thread instead of asyncio
-        def run_scraper_thread():
-            try:
-                import time
-                import requests
-                import json
-                import yaml
-                import os
-                from datetime import datetime
-                
-                # Update state
-                self.scraper_running = True
-                self.scraper_stats["status"] = "running"
-                self.scraper_stats["last_run"] = datetime.now().isoformat()
-                
-                logger.info(f"Starting scraper with max_pages={max_pages}")
-                
-                # Load API configuration
-                config_path = os.path.join(os.getcwd(), 'config', 'api_config.yaml')
-                if not os.path.exists(config_path):
-                    logger.error(f"API config file not found at {config_path}")
-                    raise FileNotFoundError(f"API config file not found at {config_path}")
-                
-                with open(config_path, 'r') as file:
-                    config = yaml.safe_load(file)
-                
-                api_config = config.get('api', {})
-                request_config = config.get('request', {})
-                
-                base_url = api_config.get('base_url')
-                headers = api_config.get('headers', {})
-                default_payload = request_config.get('default_payload', {})
-                
-                logger.info(f"Using API URL: {base_url}")
-                
-                # Initialize tracking variables
-                total_jobs = 0
-                new_jobs = 0
-                
-                # Process pages
-                for page in range(1, max_pages + 1):
-                    logger.info(f"Processing page {page}/{max_pages}")
+            # Create scraper instance
+            scraper = JobScraper(
+                db_manager=self.db_manager,
+                config_path=self.config_path
+            )
+            
+            # Start scraper in a separate thread
+            def run_scraper():
+                try:
+                    self.scraper_running = True
+                    self.scraper_stats["status"] = "running"
+                    self.scraper_stats["last_run"] = datetime.now()
                     
-                    # Create payload for this page
-                    payload = dict(default_payload)
-                    payload['page'] = page
+                    # Run scraper
+                    start_time = time.time()
+                    results = scraper.run()
+                    duration = time.time() - start_time
                     
-                    try:
-                        # Make API request
-                        response = requests.post(base_url, headers=headers, json=payload, timeout=30)
-                        response.raise_for_status()
-                        
-                        # Parse response
-                        data = response.json()
-                        jobs = data.get('data', {}).get('jobPosts', [])
-                        
-                        if not jobs:
-                            logger.warning(f"No jobs found on page {page}")
-                            continue
-                            
-                        logger.info(f"Found {len(jobs)} jobs on page {page}")
-                        total_jobs += len(jobs)
-                        
-                        # Process and save jobs to the database
-                        if self.db_manager:
-                            conn = None
-                            try:
-                                # Create a new direct database connection for reliability
-                                conn = psycopg2.connect(self._build_db_connection_string())
-                                cursor = conn.cursor()
-                                
-                                for job in jobs:
-                                    try:
-                                        job_id = job.get('id')
-                                        if not job_id:
-                                            logger.warning(f"Skipping job with no ID")
-                                            continue
-                                            
-                                        # Get company info
-                                        company_info = job.get('company', {})
-                                        company_name_en = company_info.get('titleEn', '')
-                                        company_name_fa = company_info.get('titleFa', '')
-                                        
-                                        # If company info is empty, try using companyDetailsSummary
-                                        if not company_name_en and not company_name_fa:
-                                            company_details = job.get('companyDetailsSummary', {})
-                                            if company_details and company_details.get('name'):
-                                                company_name_en = company_details.get('name', {}).get('titleEn', '')
-                                                company_name_fa = company_details.get('name', {}).get('titleFa', '')
-                                        
-                                        # Get activation time
-                                        activation_time = None
-                                        activation_time_data = job.get('activationTime', {})
-                                        if activation_time_data and 'date' in activation_time_data:
-                                            activation_time = activation_time_data.get('date')
-                                            
-                                        # Get URL
-                                        url = job.get('url', '')
-                                        
-                                        # Map to our job schema
-                                        job_data = {
-                                            'id': str(job_id),
-                                            'title': job.get('title', ''),
-                                            'company_name_en': company_name_en,
-                                            'company_name_fa': company_name_fa,
-                                            'activation_time': activation_time,
-                                            'url': url
-                                        }
-                                        
-                                        # Log job being processed
-                                        logger.info(f"Processing job {job_id}: {job_data['title']}")
-                                        
-                                        # Prepare locations as proper JSON or set to null
-                                        locations_json = None
-                                        if job.get('locations'):
-                                            try:
-                                                locations_json = json.dumps(job.get('locations'), ensure_ascii=False)
-                                            except Exception as e:
-                                                logger.warning(f"Failed to encode locations: {e}")
-                                                
-                                        # Prepare raw data as proper JSON
-                                        raw_data_json = None
-                                        try:
-                                            raw_data_json = json.dumps(job, ensure_ascii=False)
-                                        except Exception as e:
-                                            logger.warning(f"Failed to encode raw_data: {e}")
-                                            # Create a simplified version with just essential fields
-                                            simplified_job = {
-                                                'id': job_id,
-                                                'title': job.get('title', ''),
-                                                'company_info': {'titleEn': company_name_en, 'titleFa': company_name_fa}
-                                            }
-                                            raw_data_json = json.dumps(simplified_job, ensure_ascii=False)
-                                        
-                                        # Salary is just stored as text, no need for JSON encoding
-                                        salary = job.get('salary', '')
-                                        
-                                        # Use ON CONFLICT to update if job exists
-                                        try:
-                                            cursor.execute(
-                                                f"""
-                                                INSERT INTO {self.db_manager.schema}.jobs 
-                                                (id, title, company_name_en, company_name_fa, activation_time, locations, salary, url, raw_data)
-                                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                                ON CONFLICT (id) DO UPDATE SET 
-                                                title = EXCLUDED.title,
-                                                company_name_en = EXCLUDED.company_name_en,
-                                                company_name_fa = EXCLUDED.company_name_fa,
-                                                activation_time = EXCLUDED.activation_time,
-                                                locations = EXCLUDED.locations,
-                                                salary = EXCLUDED.salary,
-                                                url = EXCLUDED.url,
-                                                raw_data = EXCLUDED.raw_data,
-                                                updated_at = CURRENT_TIMESTAMP
-                                                RETURNING (xmax = 0) AS inserted
-                                                """,
-                                                (
-                                                    job_data['id'],
-                                                    job_data['title'],
-                                                    job_data['company_name_en'],
-                                                    job_data['company_name_fa'],
-                                                    job_data['activation_time'],
-                                                    locations_json,
-                                                    salary,
-                                                    job_data['url'],
-                                                    raw_data_json
-                                                )
-                                            )
-                                            
-                                            # Check if inserted or updated
-                                            result = cursor.fetchone()
-                                            if result and result[0]:  # True if inserted, False if updated
-                                                logger.info(f"Inserted new job: {job_id}")
-                                                new_jobs += 1
-                                            else:
-                                                logger.info(f"Updated existing job: {job_id}")
-                                            
-                                            conn.commit()
-                                        except Exception as e:
-                                            logger.error(f"Database error for job {job_id}: {e}")
-                                            conn.rollback()
-                                    except Exception as e:
-                                        logger.error(f"Error processing job {job.get('id')}: {e}")
-                                        continue
-                                
-                                cursor.close()
-                            except Exception as e:
-                                logger.error(f"Database error during job processing: {e}")
-                            finally:
-                                if conn:
-                                    conn.close()
-                        
-                        # Sleep to avoid rate limiting
-                        time.sleep(2)
-                        
-                    except requests.exceptions.RequestException as e:
-                        logger.error(f"Request error on page {page}: {e}")
-                        break
-                
-                # Update stats after scraping
-                self.scraper_stats["total_jobs"] = total_jobs
-                self.scraper_stats["new_jobs"] = new_jobs
-                self.scraper_stats["status"] = "completed"
-                logger.info(f"Scraping completed: {total_jobs} total jobs, {new_jobs} new jobs")
-                
-            except Exception as e:
-                logger.error(f"Error running scraper: {e}")
-                self.scraper_stats["status"] = "error"
-                self.scraper_stats["error"] = str(e)
-            finally:
-                self.scraper_running = False
-                
-        # Start thread
-        thread = threading.Thread(target=run_scraper_thread)
-        thread.daemon = True
-        thread.start()
-        
-        flash(f"Started scraping job with max_pages={max_pages}", "success")
-        return redirect(url_for('dashboard'))
+                    # Update metrics
+                    if results.get("new_jobs", 0) > 0:
+                        NEW_JOBS.inc(results.get("new_jobs", 0))
+                    
+                    if results.get("errors", 0) > 0:
+                        ERRORS.labels(type="scraping").inc(results.get("errors", 0))
+                    
+                    if results.get("retries", 0) > 0:
+                        RETRIES.inc(results.get("retries", 0))
+                    
+                    # Update scraper stats
+                    self.scraper_stats.update({
+                        "total_jobs": results.get("total_jobs", 0),
+                        "new_jobs": results.get("new_jobs", 0),
+                        "failed_jobs": results.get("failed_jobs", 0),
+                        "duration": duration,
+                        "status": "completed"
+                    })
+                except Exception as e:
+                    logger.error(f"Error in scraper: {str(e)}")
+                    ERRORS.labels(type="scraper_thread").inc()
+                    self.scraper_stats["status"] = "error"
+                    self.scraper_stats["error"] = str(e)
+                finally:
+                    self.scraper_running = False
+            
+            # Start the scraper thread
+            self.current_scraper_task = threading.Thread(target=run_scraper)
+            self.current_scraper_task.daemon = True
+            self.current_scraper_task.start()
+            
+            flash("Scraper started successfully.", "success")
+            return redirect(url_for('dashboard'))
+        except Exception as e:
+            logger.error(f"Error starting scraper: {str(e)}")
+            ERRORS.labels(type="scraper_start").inc()
+            flash(f"Error starting scraper: {str(e)}", "danger")
+            return redirect(url_for('dashboard'))
         
     def stop_scrape(self):
         """Stop a running scraping job."""
@@ -1618,12 +1470,21 @@ def create_app(
             logger.info("Database connection successful")
         except Exception as e:
             logger.error(f"Error connecting to database: {str(e)}")
+            ERRORS.labels(type="database_connection").inc()
         finally:
             if conn:
                 conn.close()
                 
         # Initialize components synchronously
         webapp._initialize_managers_sync()
+        
+        # Setup monitoring
+        setup_monitoring(
+            app, 
+            version=os.environ.get("APP_VERSION", "0.1.0"),
+            config_name=os.path.basename(config_path),
+            env=os.environ.get("FLASK_ENV", "production")
+        )
         
         return app
     except Exception as e:
