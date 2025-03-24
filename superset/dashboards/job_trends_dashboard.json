@@ -1,0 +1,209 @@
+{
+    "dashboards": [
+        {
+            "dashboard_title": "Job Market Trends",
+            "description": "Key metrics and trends from the job scraper database",
+            "css": "",
+            "slug": "job-market-trends",
+            "uuid": "a44ff0b0-9999-4444-aaaa-111111111111",
+            "position_json": "{\"CHART-job_count_trend\":{\"children\":[],\"id\":\"CHART-job_count_trend\",\"meta\":{\"chartId\":1,\"height\":50,\"sliceName\":\"Job Postings Over Time\",\"width\":6},\"parents\":[\"ROOT_ID\",\"GRID_ID\",\"ROW-1\"],\"type\":\"CHART\"},\"CHART-job_by_location\":{\"children\":[],\"id\":\"CHART-job_by_location\",\"meta\":{\"chartId\":2,\"height\":50,\"sliceName\":\"Jobs by Location\",\"width\":6},\"parents\":[\"ROOT_ID\",\"GRID_ID\",\"ROW-1\"],\"type\":\"CHART\"},\"CHART-job_by_category\":{\"children\":[],\"id\":\"CHART-job_by_category\",\"meta\":{\"chartId\":3,\"height\":50,\"sliceName\":\"Jobs by Category\",\"width\":6},\"parents\":[\"ROOT_ID\",\"GRID_ID\",\"ROW-2\"],\"type\":\"CHART\"},\"CHART-company_distribution\":{\"children\":[],\"id\":\"CHART-company_distribution\",\"meta\":{\"chartId\":4,\"height\":50,\"sliceName\":\"Top Companies\",\"width\":6},\"parents\":[\"ROOT_ID\",\"GRID_ID\",\"ROW-2\"],\"type\":\"CHART\"},\"GRID_ID\":{\"children\":[\"ROW-1\",\"ROW-2\"],\"id\":\"GRID_ID\",\"parents\":[\"ROOT_ID\"],\"type\":\"GRID\"},\"HEADER_ID\":{\"id\":\"HEADER_ID\",\"meta\":{\"text\":\"Job Market Trends\"},\"type\":\"HEADER\"},\"ROOT_ID\":{\"children\":[\"GRID_ID\"],\"id\":\"ROOT_ID\",\"type\":\"ROOT\"},\"ROW-1\":{\"children\":[\"CHART-job_count_trend\",\"CHART-job_by_location\"],\"id\":\"ROW-1\",\"meta\":{\"background\":\"BACKGROUND_TRANSPARENT\"},\"parents\":[\"ROOT_ID\",\"GRID_ID\"],\"type\":\"ROW\"},\"ROW-2\":{\"children\":[\"CHART-job_by_category\",\"CHART-company_distribution\"],\"id\":\"ROW-2\",\"meta\":{\"background\":\"BACKGROUND_TRANSPARENT\"},\"parents\":[\"ROOT_ID\",\"GRID_ID\"],\"type\":\"ROW\"}}",
+            "metadata": {
+                "timed_refresh_immune_slices": [],
+                "expanded_slices": {},
+                "refresh_frequency": 0,
+                "default_filters": "{}",
+                "color_scheme": "supersetColors",
+                "chart_configuration": {}
+            },
+            "charts": [
+                {
+                    "slice_name": "Job Postings Over Time",
+                    "viz_type": "line",
+                    "params": {
+                        "adhoc_filters": [],
+                        "annotation_layers": [],
+                        "bottom_margin": "auto",
+                        "color_scheme": "supersetColors",
+                        "comparison_type": "values",
+                        "datasource": "1__table",
+                        "granularity_sqla": "post_date",
+                        "groupby": [],
+                        "line_interpolation": "linear",
+                        "metrics": [
+                            {
+                                "column": {
+                                    "column_name": "job_count"
+                                }
+                            }
+                        ],
+                        "order_desc": true,
+                        "rich_tooltip": true,
+                        "rolling_type": "None",
+                        "row_limit": 10000,
+                        "show_brush": "auto",
+                        "show_legend": true,
+                        "show_markers": true,
+                        "slice_id": 1,
+                        "time_grain_sqla": "P1D",
+                        "time_range": "Last quarter",
+                        "time_range_endpoints": [
+                            "inclusive",
+                            "exclusive"
+                        ],
+                        "viz_type": "line",
+                        "x_axis_format": "smart_date",
+                        "x_ticks_layout": "auto",
+                        "y_axis_bounds": [
+                            null,
+                            null
+                        ],
+                        "y_axis_format": "SMART_NUMBER"
+                    },
+                    "query_context": "",
+                    "datasource_name": "Job Posting Trends",
+                    "datasource_type": "table",
+                    "datasource_id": 1,
+                    "query_context": {
+                        "datasource": {
+                            "id": 1,
+                            "type": "table"
+                        },
+                        "force": false,
+                        "queries": [
+                            {
+                                "time_range": "Last quarter",
+                                "granularity": "post_date",
+                                "filters": [],
+                                "extras": {
+                                    "time_grain_sqla": "P1D"
+                                },
+                                "applied_time_extras": {},
+                                "columns": [],
+                                "metrics": [
+                                    {
+                                        "column": {
+                                            "column_name": "job_count"
+                                        }
+                                    }
+                                ],
+                                "orderby": [
+                                    [
+                                        "job_count",
+                                        false
+                                    ]
+                                ],
+                                "annotation_layers": [],
+                                "row_limit": 10000,
+                                "timeseries_limit": 0,
+                                "order_desc": true
+                            }
+                        ]
+                    },
+                    "sql": "SELECT DATE_TRUNC('day', activation_time) as post_date, COUNT(*) as job_count FROM jobs WHERE activation_time > CURRENT_DATE - INTERVAL '90 days' GROUP BY post_date ORDER BY post_date;"
+                },
+                {
+                    "slice_name": "Jobs by Location",
+                    "viz_type": "pie",
+                    "params": {
+                        "adhoc_filters": [],
+                        "color_scheme": "supersetColors",
+                        "datasource": "2__table",
+                        "granularity_sqla": "location",
+                        "groupby": [
+                            "location"
+                        ],
+                        "innerRadius": 30,
+                        "labels_outside": true,
+                        "metric": {
+                            "column": {
+                                "column_name": "job_count"
+                            }
+                        },
+                        "number_format": "SMART_NUMBER",
+                        "outerRadius": 70,
+                        "pie_label_type": "key",
+                        "row_limit": 10,
+                        "show_labels": true,
+                        "show_legend": true,
+                        "slice_id": 2,
+                        "viz_type": "pie"
+                    },
+                    "query_context": "",
+                    "datasource_name": "Jobs by Location",
+                    "datasource_type": "table",
+                    "datasource_id": 2,
+                    "sql": "SELECT CASE WHEN locations IS NULL THEN 'Unknown' WHEN locations = '[]' THEN 'Unknown' ELSE locations->0->>'city' END as location, COUNT(*) as job_count FROM jobs GROUP BY location ORDER BY job_count DESC LIMIT 10;"
+                },
+                {
+                    "slice_name": "Jobs by Category",
+                    "viz_type": "dist_bar",
+                    "params": {
+                        "adhoc_filters": [],
+                        "bottom_margin": "auto",
+                        "color_scheme": "supersetColors",
+                        "columns": [],
+                        "datasource": "3__table",
+                        "granularity_sqla": "category",
+                        "groupby": [
+                            "category"
+                        ],
+                        "metrics": [
+                            {
+                                "column": {
+                                    "column_name": "job_count"
+                                }
+                            }
+                        ],
+                        "order_bars": true,
+                        "row_limit": 10,
+                        "show_legend": true,
+                        "slice_id": 3,
+                        "viz_type": "dist_bar",
+                        "x_axis_label": "Category",
+                        "y_axis_label": "Number of Jobs"
+                    },
+                    "query_context": "",
+                    "datasource_name": "Jobs by Category",
+                    "datasource_type": "table",
+                    "datasource_id": 3,
+                    "sql": "SELECT COALESCE(job_categories->0->>'name', 'Uncategorized') as category, COUNT(*) as job_count FROM jobs GROUP BY category ORDER BY job_count DESC LIMIT 10;"
+                },
+                {
+                    "slice_name": "Top Companies",
+                    "viz_type": "table",
+                    "params": {
+                        "adhoc_filters": [],
+                        "align_pn": false,
+                        "all_columns": [
+                            "company_name_en",
+                            "job_count"
+                        ],
+                        "color_pn": true,
+                        "datasource": "4__table",
+                        "granularity_sqla": "company_name_en",
+                        "groupby": [],
+                        "include_search": true,
+                        "metrics": [],
+                        "order_by_cols": [
+                            "[]"
+                        ],
+                        "order_desc": true,
+                        "page_length": 10,
+                        "percent_metrics": [],
+                        "row_limit": 10,
+                        "show_cell_bars": true,
+                        "slice_id": 4,
+                        "table_timestamp_format": "smart_date",
+                        "time_grain_sqla": null,
+                        "viz_type": "table"
+                    },
+                    "query_context": "",
+                    "datasource_name": "Top Companies",
+                    "datasource_type": "table",
+                    "datasource_id": 4,
+                    "sql": "SELECT company_name_en, COUNT(*) as job_count FROM jobs WHERE company_name_en IS NOT NULL AND company_name_en != '' GROUP BY company_name_en ORDER BY job_count DESC LIMIT 10;"
+                }
+            ]
+        }
+    ]
+}

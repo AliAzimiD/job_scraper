@@ -10,8 +10,8 @@ api:
     accept: "application/json, text/plain, */*"
     accept-encoding: "gzip, deflate, br, zstd"
     accept-language: "en-US,en;q=0.9"
-    # Unique client identifier; can be overridden by environment variables if needed.
-    clientid: "4575772"
+    # Unique client identifier; must match the clientId in the payload
+    clientid: "4558668"
     content-type: "application/json"
     ngsw-bypass: "true"
     origin: "https://karbord.io"
@@ -40,7 +40,7 @@ request:
     jobPostCategories: [] # Categories for filtering job posts.
     jobBoardIds: []       # List of job board IDs to filter by.
     hasNoWorkExperienceRequirement: false
-    clientId: 4558668     # Must match the API's expected client ID.
+    clientId: 4558668     # Client ID must match the one in headers
     page: 1               # Default starting page.
     nextPageToken: null   # Token for pagination if required.
 
@@ -54,8 +54,8 @@ scraper:
 # ==============================================
   database:
     enabled: true
-    # Use environment variables or secrets in production to secure the connection string.
-    connection_string: "postgresql://username:password@localhost:5432/jobsdb"
+    # Using a more specific connection string for the Docker environment
+    connection_string: "postgresql://jobuser:devpassword@db:5432/jobsdb"
     schema: "public"
     batch_size: 1000         # Maximum number of jobs per bulk insert.
     save_raw_data: true      # Option to also save raw data locally.
@@ -66,29 +66,29 @@ scraper:
   # Batch and Pagination Settings
   batch_size: 100            # Number of jobs per API request (batch).
   jobs_per_batch: 1000       # Total jobs to accumulate before processing a full batch.
-  max_pages: 9000            # Maximum number of pages to scrape in one run.
+  max_pages: 3               # Set to a lower number for testing
   chunk_size: 1000           # Chunk size when processing/inserting jobs.
 
   # Resource and Concurrency Settings
   memory_limit: 1024         # Maximum allowed memory usage in MB.
-  max_concurrent_requests: 5 # Limit on simultaneous HTTP requests.
+  max_concurrent_requests: 2 # Reduced to avoid rate limiting
   timeout: 60                # HTTP request timeout in seconds.
 
   # Timing and Rate Limiting Settings
-  sleep_time: 0.5            # Base delay between API requests (in seconds).
+  sleep_time: 2.0            # Increased delay between API requests (in seconds) to avoid rate limiting
   rate_limit:
-    requests_per_minute: 120 # Maximum number of API requests per minute.
-    burst: 10                # Maximum burst (immediate) requests allowed.
+    requests_per_minute: 30  # Reduced to avoid rate limiting
+    burst: 5                 # Maximum burst (immediate) requests allowed.
 
   # Retry Logic
   max_retries: 5             # Maximum number of retries on failure.
   retry_delay:
-    min: 2                   # Minimum delay before a retry (seconds).
-    max: 10                  # Maximum delay before a retry (seconds).
+    min: 5                   # Increased minimum delay before a retry (seconds).
+    max: 15                  # Increased maximum delay before a retry (seconds).
 
   # Resume and Empty-Page Logic
   lookback_pages: 5          # Number of pages to look back when resuming.
-  minimum_pages: 10          # Minimum pages to check before stopping.
+  minimum_pages: 3           # Minimum pages to check before stopping.
   max_empty_pages: 3         # Maximum consecutive empty pages allowed.
   max_resume_age: 86400      # Maximum age (in seconds) of previous state to resume.
 
@@ -148,4 +148,67 @@ scraper:
     enabled: true
     verbose_logging: true
     save_raw_responses: true
+
+# ==============================================
+# Superset Integration
+# ==============================================
+superset:
+  # URL for the Superset instance
+  url: "http://localhost:8088"
+  
+  # Default dashboards to display
+  dashboards:
+    - id: "job-market-trends"
+      title: "Job Market Trends"
+      description: "Overview of job posting trends and metrics"
+    
+    - id: "salary-analysis"
+      title: "Salary Analysis"
+      description: "Analysis of salary distributions across jobs"
+  
+  # Embedded visualizations
+  embedded_charts:
+    - id: "slice_1"
+      title: "Job Postings Over Time"
+      description: "Line chart showing job posting trends"
+    
+    - id: "slice_2" 
+      title: "Jobs by Location"
+      description: "Distribution of jobs by location"
+  
+  # SQL queries for data extraction
+  sql_queries:
+    job_trends: "SELECT DATE_TRUNC('day', activation_time) as post_date, COUNT(*) as job_count 
+                FROM jobs 
+                WHERE activation_time > CURRENT_DATE - INTERVAL '90 days' 
+                GROUP BY post_date 
+                ORDER BY post_date;"
+                
+    location_distribution: "SELECT 
+                          CASE WHEN locations IS NULL THEN 'Unknown'
+                          WHEN locations = '[]' THEN 'Unknown'
+                          ELSE locations->0->>'city' END as location,
+                          COUNT(*) as job_count
+                          FROM jobs
+                          GROUP BY location
+                          ORDER BY job_count DESC
+                          LIMIT 10;"
+                          
+    category_distribution: "SELECT 
+                          COALESCE(job_categories->0->>'name', 'Uncategorized') as category, 
+                          COUNT(*) as job_count
+                          FROM jobs
+                          GROUP BY category
+                          ORDER BY job_count DESC
+                          LIMIT 10;"
+                          
+    company_distribution: "SELECT 
+                         company_name_en, 
+                         COUNT(*) as job_count 
+                         FROM jobs 
+                         WHERE company_name_en IS NOT NULL 
+                         AND company_name_en != '' 
+                         GROUP BY company_name_en 
+                         ORDER BY job_count DESC 
+                         LIMIT 10;"
 

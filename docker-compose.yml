@@ -1,164 +1,111 @@
-version: '3.9'
+version: '3.8'
 
 services:
-  scraper:
+  web:
     build:
       context: .
-      dockerfile: Dockerfile
-      args:
-        - BUILDKIT_INLINE_CACHE=1
-    container_name: job_scraper
+      dockerfile: docker/Dockerfile
+    container_name: job-scraper-web
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
     volumes:
-      - job_data:/app/job_data
-      - ./config:/app/config:ro
+      - ./:/app
+      - job_data:/app/data
     environment:
-      - SCRAPER_ENV=production
-      - TZ=Asia/Tehran
+      - FLASK_ENV=production
+      - FLASK_HOST=0.0.0.0
+      - FLASK_PORT=5000
       - POSTGRES_HOST=db
       - POSTGRES_PORT=5432
       - POSTGRES_DB=jobsdb
       - POSTGRES_USER=jobuser
-      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
-      - ENABLE_CRON=true
-      - RUN_ON_START=true
+      - POSTGRES_PASSWORD=secure_password_change_me
+      - FLASK_SECRET_KEY=change_this_to_a_random_secret_key
+      - API_USERNAME=api_user
+      - API_PASSWORD=change_this_to_a_secure_password
       - LOG_LEVEL=INFO
-      - ENABLE_HEALTH_CHECK=true
-      - HEALTH_PORT=8081
-    secrets:
-      - db_password
+      - LOG_DIR=/app/data/logs
+      - CONFIG_PATH=/app/config/app_config.yaml
     depends_on:
-      db:
-        condition: service_healthy
-    ports:
-      - "8081:8081"
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '1'
-        reservations:
-          memory: 1G
-          cpus: '0.5'
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "100m"
-        max-file: "3"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
-      interval: 1m
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+      - db
     networks:
-      - scraper-network
+      - job-scraper-network
 
   db:
-    image: postgres:15-alpine
-    container_name: job_db
+    image: postgres:14-alpine
+    container_name: job-scraper-db
+    restart: unless-stopped
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init-db:/docker-entrypoint-initdb.d
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
       - POSTGRES_DB=jobsdb
       - POSTGRES_USER=jobuser
-      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
-      - POSTGRES_INITDB_ARGS="--data-checksums"
-    secrets:
-      - db_password
+      - POSTGRES_PASSWORD=secure_password_change_me
     ports:
       - "5432:5432"
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-        reservations:
-          memory: 512M
-    restart: unless-stopped
+    networks:
+      - job-scraper-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jobuser -d jobsdb"]
+      test: [ "CMD-SHELL", "pg_isready -U jobuser -d jobsdb" ]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - scraper-network
-    shm_size: 256m
-
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: job_pgadmin
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@example.com
-      - PGADMIN_DEFAULT_PASSWORD_FILE=/run/secrets/pgadmin_password
-      - PGADMIN_CONFIG_SERVER_MODE=False
-    secrets:
-      - pgadmin_password
-    ports:
-      - "5050:80"
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    networks:
-      - scraper-network
-    healthcheck:
-      test: ["CMD", "wget", "-O", "-", "http://localhost/misc/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
 
   superset:
     build:
       context: .
       dockerfile: Dockerfile.superset
-    container_name: job_superset
+    container_name: job-scraper-superset
+    restart: unless-stopped
     depends_on:
-      db:
-        condition: service_healthy
-    secrets:
-      - db_password
-    environment:
-      SUPERSET_SECRET_KEY: "change_this_to_something_random"
+      - db
+      - redis
     ports:
       - "8088:8088"
+    environment:
+      - SUPERSET_SECRET_KEY=change_this_superset_secret_key
+      - ADMIN_PASSWORD=admin
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DATABASE_URI=postgresql://jobuser:secure_password_change_me@db:5432/jobsdb
+      - SUPERSET_DB_URI=postgresql://jobuser:secure_password_change_me@db:5432/superset
+      - REDIS_URL=redis://redis:6379/0
+      - CREATE_SAMPLE_DASHBOARD=true
+      - MAPBOX_API_KEY=${MAPBOX_API_KEY:-""}
+      - PYTHONPATH=/app/pythonpath
+      - SUPERSET_ENV=production
     volumes:
       - superset_home:/app/superset_home
-    command: >
-      /bin/bash -c '
-        DB_PASS=$(cat /run/secrets/db_password) &&
-        export SQLALCHEMY_DATABASE_URI="postgresql+psycopg2://jobuser:$DB_PASS@db:5432/jobsdb" &&
-        superset fab create-admin --username admin --password admin --firstname Admin --lastname User --email admin@example.com &&
-        superset db upgrade &&
-        superset init &&
-        superset run -p 8088 -h 0.0.0.0 --with-threads --reload --debugger
-      '
-    restart: unless-stopped
     networks:
-      - scraper-network
+      - job-scraper-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8088/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: job-scraper-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - job-scraper-network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+networks:
+  job-scraper-network:
+    driver: bridge
 
 volumes:
   postgres_data:
-    name: job_postgres_data
-  pgadmin_data:
-    name: job_pgadmin_data
-  superset_home:
-    name: job_superset_home
   job_data:
-    name: job_postgres_data
-
-networks:
-  scraper-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16
-
-secrets:
-  db_password:
-    file: ./secrets/db_password.txt
-  pgadmin_password:
-    file: ./secrets/pgadmin_password.txt
+  superset_home:
+  redis_data:

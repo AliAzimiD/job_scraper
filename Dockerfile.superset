@@ -5,8 +5,28 @@ FROM apache/superset:latest
 # Switch to root to install additional packages
 USER root
 
-# Install psycopg2-binary (it’s better to use psycopg2-binary for simplicity)
-RUN pip install --no-cache-dir psycopg2-binary
+# Install PostgreSQL drivers and other dependencies
+RUN pip install --no-cache-dir \
+    psycopg2-binary \
+    sqlalchemy-utils \
+    pandas==1.5.3 \
+    sqlalchemy==1.4.48
 
-# Reset to the default non-root user (optional, if the base image defines one)
+# Add required environment variables
+ENV PYTHONPATH=/app/pythonpath
+ENV SUPERSET_CONFIG_PATH=/app/superset_config.py
+
+# Copy custom configuration
+COPY ./superset/superset_config.py /app/superset_config.py
+COPY ./superset/init_superset.sh /app/init_superset.sh
+COPY ./superset/dashboards /app/dashboards
+
+# Create necessary directories
+RUN mkdir -p /app/pythonpath && \
+    chmod +x /app/init_superset.sh
+
+# Reset to the default non-root user
 USER superset
+
+# Set entrypoint to our initialization script
+ENTRYPOINT ["/app/init_superset.sh"]
