@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+
+{% block title %}Job Scraper - Import/Export{% endblock %}
+
+{% block head %}
+<style>
+    .format-card {
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border: 2px solid transparent;
+    }
+
+    .format-card:hover {
+        transform: translateY(-5px);
+    }
+
+    .format-card.selected {
+        border-color: #0d6efd;
+        background-color: rgba(13, 110, 253, 0.05);
+    }
+
+    .format-icon {
+        font-size: 2rem;
+        margin-bottom: 1rem;
+    }
+
+    .json-icon {
+        color: #ffc107;
+    }
+
+    .csv-icon {
+        color: #198754;
+    }
+
+    .sql-icon {
+        color: #0d6efd;
+    }
+
+    .upload-box {
+        border: 2px dashed #dee2e6;
+        padding: 2rem;
+        text-align: center;
+        transition: all 0.2s ease;
+        background-color: #f8f9fa;
+    }
+
+    .upload-box:hover,
+    .upload-box.dragover {
+        border-color: #0d6efd;
+        background-color: rgba(13, 110, 253, 0.05);
+    }
+
+    .upload-icon {
+        font-size: 3rem;
+        color: #6c757d;
+        margin-bottom: 1rem;
+    }
+
+    .custom-file-input {
+        cursor: pointer;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow">
+            <div class="card-body">
+                <h2 class="card-title">
+                    <i class="fas fa-database text-primary me-2"></i>Database Management
+                </h2>
+                <p class="lead">Import and export job data from the database</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Export Section -->
+    <div class="col-md-6 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-header bg-primary text-white">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-file-export me-2"></i>Export Data
+                </h5>
+            </div>
+            <div class="card-body">
+                <p>Export the current database content to a file in your preferred format.</p>
+
+                <form action="/api/export-db" method="post" id="export-form">
+                    <div class="mb-3">
+                        <label for="export-format" class="form-label">Export Format</label>
+                        <select class="form-select" id="export-format" name="format" required>
+                            <option value="json">JSON</option>
+                            <option value="csv">CSV</option>
+                            <option value="sql">SQL</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="include-raw-data"
+                                name="include_raw_data">
+                            <label class="form-check-label" for="include-raw-data">
+                                Include raw data
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-download me-2"></i>Export Database
+                        </button>
+                    </div>
+                </form>
+
+                <div class="alert alert-success mt-3 d-none" id="export-success">
+                    <i class="fas fa-check-circle me-2"></i><span>Export completed successfully!</span>
+                </div>
+
+                <div class="alert alert-danger mt-3 d-none" id="export-error">
+                    <i class="fas fa-exclamation-circle me-2"></i><span>An error occurred during export.</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Section -->
+    <div class="col-md-6 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-header bg-primary text-white">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-file-import me-2"></i>Import Data
+                </h5>
+            </div>
+            <div class="card-body">
+                <p>Import job data from a file into the database.</p>
+
+                <form action="/api/import-db" method="post" enctype="multipart/form-data" id="import-form">
+                    <div class="mb-3">
+                        <label for="import-file" class="form-label">Select File</label>
+                        <input class="form-control" type="file" id="import-file" name="file" required>
+                        <div class="form-text">Supported formats: JSON, CSV, SQL</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="update-existing" name="update_existing"
+                                checked>
+                            <label class="form-check-label" for="update-existing">
+                                Update existing records
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-upload me-2"></i>Import Database
+                        </button>
+                    </div>
+                </form>
+
+                <div class="alert alert-success mt-3 d-none" id="import-success">
+                    <i class="fas fa-check-circle me-2"></i><span>Import completed successfully!</span>
+                </div>
+
+                <div class="alert alert-danger mt-3 d-none" id="import-error">
+                    <i class="fas fa-exclamation-circle me-2"></i><span>An error occurred during import.</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Backup and Restore Section -->
+<div class="row">
+    <div class="col-md-12 mb-4">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-save me-2"></i>Backup and Restore
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h5>Create Backup</h5>
+                        <p>Create a complete backup of the database with all job data.</p>
+                        <form action="/api/create-backup" method="post" id="backup-form">
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="include-files"
+                                        name="include_files" checked>
+                                    <label class="form-check-label" for="include-files">
+                                        Include data files
+                                    </label>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-success">
+                                <i class="fas fa-save me-2"></i>Create Backup
+                            </button>
+                        </form>
+                    </div>
+
+                    <div class="col-md-6">
+                        <h5>Restore Backup</h5>
+                        <p>Restore the database from a previous backup file.</p>
+                        <form action="/api/restore-backup" method="post" enctype="multipart/form-data"
+                            id="restore-form">
+                            <div class="mb-3">
+                                <label for="backup-file" class="form-label">Select Backup File</label>
+                                <input class="form-control" type="file" id="backup-file" name="backup_file" required>
+                            </div>
+
+                            <button type="submit" class="btn btn-warning">
+                                <i class="fas fa-undo-alt me-2"></i>Restore Backup
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Handle export form submission
+        const exportForm = document.getElementById('export-form');
+        const exportSuccess = document.getElementById('export-success');
+        const exportError = document.getElementById('export-error');
+
+        // The export form will be handled by the browser's default form submission
+        // which will trigger a file download
+
+        // Handle import form submission
+        const importForm = document.getElementById('import-form');
+        const importSuccess = document.getElementById('import-success');
+        const importError = document.getElementById('import-error');
+
+        importForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const formData = new FormData(importForm);
+
+            // Show loading overlay
+            document.getElementById('loadingOverlay').classList.add('active');
+
+            fetch('/api/import-db', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    // Hide loading overlay
+                    document.getElementById('loadingOverlay').classList.remove('active');
+
+                    if (data.success) {
+                        importSuccess.classList.remove('d-none');
+                        importSuccess.querySelector('span').textContent = `Import completed successfully! ${data.records_imported} records imported.`;
+                        importError.classList.add('d-none');
+                    } else {
+                        importError.classList.remove('d-none');
+                        importError.querySelector('span').textContent = data.message || 'An error occurred during import.';
+                        importSuccess.classList.add('d-none');
+                    }
+
+                    // Reset form after 3 seconds on success
+                    if (data.success) {
+                        setTimeout(() => {
+                            importForm.reset();
+                        }, 3000);
+                    }
+                })
+                .catch(error => {
+                    // Hide loading overlay
+                    document.getElementById('loadingOverlay').classList.remove('active');
+
+                    importError.classList.remove('d-none');
+                    importError.querySelector('span').textContent = 'Network error: ' + error.message;
+                    importSuccess.classList.add('d-none');
+                });
+        });
+
+        // Similar handling for backup and restore forms can be added here
+    });
+</script>
+{% endblock %}

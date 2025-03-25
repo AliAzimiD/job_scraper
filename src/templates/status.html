@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+
+{% block title %}Job Scraper - Status{% endblock %}
+
+{% block head %}
+<meta http-equiv="refresh" content="60">
+<style>
+    .status-card {
+        transition: all 0.3s ease;
+    }
+
+    .status-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    .metrics-table th,
+    .metrics-table td {
+        padding: 0.75rem;
+    }
+
+    .progress {
+        height: 8px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow">
+            <div class="card-body">
+                <h2 class="card-title">
+                    <i class="fas fa-chart-line text-primary me-2"></i>System Status
+                </h2>
+                <p class="lead">Real-time monitoring of the Job Scraper system components</p>
+                <div class="text-muted small">
+                    <i class="fas fa-clock me-1"></i>Auto-refreshes every 60 seconds | Last updated: {{ 'March 24, 2025
+                    20:45:32' }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card status-card h-100 border-success">
+            <div class="card-body text-center">
+                <h1 class="display-4 text-success mb-3">
+                    <i class="fas fa-server"></i>
+                </h1>
+                <h5 class="card-title">Web Application</h5>
+                <div class="badge bg-success mb-2">Online</div>
+                <p class="text-muted small mb-0">Uptime: 7 days, 3 hours</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card status-card h-100 border-success">
+            <div class="card-body text-center">
+                <h1 class="display-4 text-success mb-3">
+                    <i class="fas fa-database"></i>
+                </h1>
+                <h5 class="card-title">Database</h5>
+                <div class="badge bg-success mb-2">Connected</div>
+                <p class="text-muted small mb-0">5,432 records</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card status-card h-100 border-success">
+            <div class="card-body text-center">
+                <h1 class="display-4 text-success mb-3">
+                    <i class="fas fa-robot"></i>
+                </h1>
+                <h5 class="card-title">Scraper</h5>
+                <div class="badge bg-success mb-2">Ready</div>
+                <p class="text-muted small mb-0">Last run: 2 hours ago</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card status-card h-100 border-success">
+            <div class="card-body text-center">
+                <h1 class="display-4 text-success mb-3">
+                    <i class="fas fa-tachometer-alt"></i>
+                </h1>
+                <h5 class="card-title">Monitoring</h5>
+                <div class="badge bg-success mb-2">Active</div>
+                <p class="text-muted small mb-0">All systems reporting</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card shadow h-100">
+            <div class="card-header bg-primary text-white">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-microchip me-2"></i>Resource Usage
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span>CPU Usage</span>
+                        <span class="text-primary">23%</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-primary" role="progressbar" style="width: 23%" aria-valuenow="23"
+                            aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span>Memory Usage</span>
+                        <span class="text-success">512 MB / 2 GB</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-success" role="progressbar" style="width: 25%" aria-valuenow="25"
+                            aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span>Disk Usage</span>
+                        <span class="text-info">3.2 GB / 20 GB</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-info" role="progressbar" style="width: 16%" aria-valuenow="16"
+                            aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span>Network I/O</span>
+                        <span class="text-warning">1.2 MB/s</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-warning" role="progressbar" style="width: 12%" aria-valuenow="12"
+                            aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card shadow h-100">
+            <div class="card-header bg-primary text-white">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-heartbeat me-2"></i>Health Metrics
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover metrics-table">
+                        <thead>
+                            <tr>
+                                <th>Metric</th>
+                                <th>Value</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>API Response Time</td>
+                                <td>42 ms</td>
+                                <td><span class="badge bg-success">Good</span></td>
+                            </tr>
+                            <tr>
+                                <td>Database Connections</td>
+                                <td>5 / 20</td>
+                                <td><span class="badge bg-success">Good</span></td>
+                            </tr>
+                            <tr>
+                                <td>Error Rate (24h)</td>
+                                <td>0.02%</td>
+                                <td><span class="badge bg-success">Good</span></td>
+                            </tr>
+                            <tr>
+                                <td>Scraper Success Rate</td>
+                                <td>99.8%</td>
+                                <td><span class="badge bg-success">Good</span></td>
+                            </tr>
+                            <tr>
+                                <td>Redis Cache Hit Ratio</td>
+                                <td>92.3%</td>
+                                <td><span class="badge bg-success">Good</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-history me-2"></i>Recent Activity
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Event</th>
+                                <th>Details</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>20:30:15</td>
+                                <td>Scraper Run</td>
+                                <td>Completed job data collection</td>
+                                <td><span class="badge bg-success">Success</span></td>
+                            </tr>
+                            <tr>
+                                <td>19:15:02</td>
+                                <td>Database Backup</td>
+                                <td>Automated daily backup</td>
+                                <td><span class="badge bg-success">Success</span></td>
+                            </tr>
+                            <tr>
+                                <td>18:45:33</td>
+                                <td>System Update</td>
+                                <td>Applied security patches</td>
+                                <td><span class="badge bg-success">Success</span></td>
+                            </tr>
+                            <tr>
+                                <td>16:20:14</td>
+                                <td>Scraper Run</td>
+                                <td>Completed job data collection</td>
+                                <td><span class="badge bg-success">Success</span></td>
+                            </tr>
+                            <tr>
+                                <td>12:10:57</td>
+                                <td>API Rate Limit</td>
+                                <td>Temporary source API rate limit reached</td>
+                                <td><span class="badge bg-warning">Warning</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Animation for status cards
+    document.addEventListener('DOMContentLoaded', function () {
+        const statusCards = document.querySelectorAll('.status-card');
+        statusCards.forEach((card, index) => {
+            setTimeout(() => {
+                card.style.opacity = '1';
+            }, index * 100);
+        });
+    });
+</script>
+{% endblock %}

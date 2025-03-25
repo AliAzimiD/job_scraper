@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+
+{% block title %}Job Scraper - Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mt-4 mb-4">Job Scraper Dashboard</h1>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-tasks me-2"></i>Quick Actions
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2 d-md-flex">
+                    <button id="startScrapeBtn" class="btn btn-primary">
+                        <i class="fas fa-sync-alt me-2"></i>Start Scraping Jobs
+                    </button>
+                    <a href="/import_export" class="btn btn-outline-secondary">
+                        <i class="fas fa-file-export me-2"></i>Import/Export Data
+                    </a>
+                    <a href="http://23.88.125.23:3000" target="_blank" class="btn btn-outline-info">
+                        <i class="fas fa-chart-line me-2"></i>View Metrics
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Overview -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-server me-2"></i>System Overview
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>System Status</h6>
+                        <ul class="list-group mb-3">
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Web Server
+                                <span class="badge bg-success">Online</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Database
+                                <span class="badge bg-success">Connected</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Scraper
+                                <span id="scraperStatus" class="badge bg-secondary">Idle</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Recent Activity</h6>
+                        <ul class="list-group">
+                            <li class="list-group-item">
+                                <small class="text-muted">Today, 10:15 AM</small>
+                                <div>System started</div>
+                            </li>
+                            <li class="list-group-item">
+                                <small class="text-muted">Today, 10:30 AM</small>
+                                <div>Connected to database</div>
+                            </li>
+                            <li class="list-group-item" id="lastScraperActivity">
+                                <small class="text-muted">Today, 11:45 AM</small>
+                                <div>Last scrape completed: 125 jobs found</div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <!-- Scraper Status Card -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-sync-alt me-2"></i>Scraper Status
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="text-center mb-3">
+                    <div id="scraperStatusIndicator" class="status-indicator status-offline mb-2">
+                        <i class="fas fa-power-off"></i>
+                    </div>
+                    <h5 id="scraperStatusText">Idle</h5>
+                    <p id="scraperStatusDescription" class="text-muted">The scraper is not currently running.</p>
+                </div>
+
+                <div id="scraperProgress" class="d-none">
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"
+                            style="width: 25%" aria-valuenow="25" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                    <div class="text-center text-muted">Scraping in progress...</div>
+                </div>
+
+                <div id="scraperStats" class="mb-3">
+                    <div class="row text-center">
+                        <div class="col-6">
+                            <h3 id="jobsFoundCount">0</h3>
+                            <small class="text-muted">Jobs Found</small>
+                        </div>
+                        <div class="col-6">
+                            <h3 id="lastRunTime">--:--</h3>
+                            <small class="text-muted">Last Run</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="scraperError" class="alert alert-danger d-none">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <span id="errorMessage">Error message will appear here</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Monitoring Links -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-bar me-2"></i>Monitoring
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="list-group">
+                    <a href="http://23.88.125.23:3000" target="_blank" class="list-group-item list-group-item-action">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1"><i class="fas fa-tachometer-alt me-2"></i>Grafana Dashboard</h6>
+                            <small><i class="fas fa-external-link-alt"></i></small>
+                        </div>
+                        <small class="text-muted">View detailed metrics and charts</small>
+                    </a>
+                    <a href="http://23.88.125.23:9090" target="_blank" class="list-group-item list-group-item-action">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1"><i class="fas fa-fire-alt me-2"></i>Prometheus</h6>
+                            <small><i class="fas fa-external-link-alt"></i></small>
+                        </div>
+                        <small class="text-muted">Query raw metrics and alerts</small>
+                    </a>
+                    <a href="/status" class="list-group-item list-group-item-action">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1"><i class="fas fa-server me-2"></i>System Status</h6>
+                            <small><i class="fas fa-chevron-right"></i></small>
+                        </div>
+                        <small class="text-muted">View detailed system status</small>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    // Helper function for formatting time
+    function formatTime(timeString) {
+        if (!timeString) return "--:--";
+        const date = new Date(timeString);
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // Update scraper status based on API response
+    function updateScraperStatus() {
+        fetch('/api/scraper-status')
+            .then(response => response.json())
+            .then(data => {
+                const isRunning = data && data.is_running;
+                const jobsFound = data && data.jobs_found ? data.jobs_found : 0;
+                const startTime = data && data.start_time;
+                const lastCompleted = data && data.last_completed;
+                const error = data && data.error;
+
+                // Update UI elements
+                document.getElementById('jobsFoundCount').textContent = jobsFound;
+                document.getElementById('lastRunTime').textContent = formatTime(lastCompleted);
+
+                const statusIndicator = document.getElementById('scraperStatusIndicator');
+                const statusText = document.getElementById('scraperStatusText');
+                const statusDescription = document.getElementById('scraperStatusDescription');
+                const progressBar = document.getElementById('scraperProgress');
+                const errorDiv = document.getElementById('scraperError');
+                const errorMessage = document.getElementById('errorMessage');
+                const scraperStatusBadge = document.getElementById('scraperStatus');
+                const lastActivity = document.getElementById('lastScraperActivity');
+
+                if (isRunning) {
+                    statusIndicator.className = 'status-indicator status-online mb-2';
+                    statusText.textContent = 'Running';
+                    statusDescription.textContent = 'The scraper is currently running and collecting job data.';
+                    progressBar.classList.remove('d-none');
+                    errorDiv.classList.add('d-none');
+                    scraperStatusBadge.className = 'badge bg-primary';
+                    scraperStatusBadge.textContent = 'Running';
+                } else if (error) {
+                    statusIndicator.className = 'status-indicator status-warning mb-2';
+                    statusText.textContent = 'Error';
+                    statusDescription.textContent = 'The scraper encountered an error during the last run.';
+                    progressBar.classList.add('d-none');
+                    errorDiv.classList.remove('d-none');
+                    errorMessage.textContent = error;
+                    scraperStatusBadge.className = 'badge bg-danger';
+                    scraperStatusBadge.textContent = 'Error';
+                } else if (lastCompleted) {
+                    statusIndicator.className = 'status-indicator status-offline mb-2';
+                    statusText.textContent = 'Idle';
+                    statusDescription.textContent = 'The scraper is not currently running but completed a previous run.';
+                    progressBar.classList.add('d-none');
+                    errorDiv.classList.add('d-none');
+                    scraperStatusBadge.className = 'badge bg-secondary';
+                    scraperStatusBadge.textContent = 'Idle';
+
+                    // Update last activity
+                    const formattedTime = formatTime(lastCompleted);
+                    lastActivity.innerHTML = `
+                        <small class="text-muted">${formattedTime}</small>
+                        <div>Last scrape completed: ${jobsFound} jobs found</div>
+                    `;
+                } else {
+                    statusIndicator.className = 'status-indicator status-offline mb-2';
+                    statusText.textContent = 'Idle';
+                    statusDescription.textContent = 'The scraper has not been run yet.';
+                    progressBar.classList.add('d-none');
+                    errorDiv.classList.add('d-none');
+                    scraperStatusBadge.className = 'badge bg-secondary';
+                    scraperStatusBadge.textContent = 'Idle';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching scraper status:', error);
+            });
+    }
+
+    // Start scraper when button is clicked
+    document.getElementById('startScrapeBtn').addEventListener('click', function () {
+        fetch('/api/start-scrape', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Update UI immediately to show running state
+                    const statusIndicator = document.getElementById('scraperStatusIndicator');
+                    const statusText = document.getElementById('scraperStatusText');
+                    const statusDescription = document.getElementById('scraperStatusDescription');
+                    const progressBar = document.getElementById('scraperProgress');
+                    const scraperStatusBadge = document.getElementById('scraperStatus');
+
+                    statusIndicator.className = 'status-indicator status-online mb-2';
+                    statusText.textContent = 'Running';
+                    statusDescription.textContent = 'The scraper is currently running and collecting job data.';
+                    progressBar.classList.remove('d-none');
+                    scraperStatusBadge.className = 'badge bg-primary';
+                    scraperStatusBadge.textContent = 'Running';
+
+                    // Then start polling for updates
+                    updateScraperStatus();
+                    // Set an interval to poll for status updates
+                    const statusInterval = setInterval(updateScraperStatus, 5000);
+                    // Stop polling after 2 minutes (in case of long-running operation)
+                    setTimeout(() => clearInterval(statusInterval), 120000);
+                } else {
+                    // Show error
+                    const errorDiv = document.getElementById('scraperError');
+                    const errorMessage = document.getElementById('errorMessage');
+                    errorDiv.classList.remove('d-none');
+                    errorMessage.textContent = data.message || 'Failed to start scraper';
+                }
+            })
+            .catch(error => {
+                console.error('Error starting scraper:', error);
+                // Show error
+                const errorDiv = document.getElementById('scraperError');
+                const errorMessage = document.getElementById('errorMessage');
+                errorDiv.classList.remove('d-none');
+                errorMessage.textContent = 'Network error while trying to start scraper';
+            });
+    });
+
+    // Initial status check when page loads
+    document.addEventListener('DOMContentLoaded', function () {
+        updateScraperStatus();
+    });
+</script>
+{% endblock %}

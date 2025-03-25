@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Scraper - {{ title }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+        header {
+            background-color: #333;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .status-card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        .online {
+            color: green;
+        }
+        footer {
+            text-align: center;
+            padding: 20px;
+            background-color: #333;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Job Scraper System</h1>
+    </header>
+    
+    <div class="container">
+        <h2>System Status</h2>
+        
+        <div class="status-card">
+            <h3>Web Application</h3>
+            <p>Status: <span class="online">Online</span></p>
+            <p>Version: 1.0.0</p>
+        </div>
+        
+        <div class="status-card">
+            <h3>Monitoring</h3>
+            <p>
+                <a href="http://23.88.125.23:9090" target="_blank">Prometheus</a> | 
+                <a href="http://23.88.125.23:3000" target="_blank">Grafana</a>
+            </p>
+        </div>
+    </div>
+    
+    <footer>
+        &copy; 2024 Job Scraper Project
+    </footer>
+</body>
+</html>

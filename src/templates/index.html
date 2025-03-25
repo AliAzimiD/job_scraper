@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+
+{% block title %}Job Scraper - Home{% endblock %}
+
+{% block head %}
+{{ super() }}
+<style>
+    .pulse-animation {
+        animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+        0% {
+            transform: scale(1);
+        }
+
+        50% {
+            transform: scale(1.05);
+        }
+
+        100% {
+            transform: scale(1);
+        }
+    }
+
+    .rotate-animation {
+        animation: rotate 1s linear infinite;
+    }
+
+    @keyframes rotate {
+        0% {
+            transform: rotate(0deg);
+        }
+
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+
+    .scraper-status-card {
+        transition: all 0.3s ease;
+    }
+
+    .scrape-details {
+        opacity: 0;
+        max-height: 0;
+        overflow: hidden;
+        transition: all 0.5s ease;
+    }
+
+    .scrape-details.show {
+        opacity: 1;
+        max-height: 500px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12 mb-4">
+        <div class="card shadow">
+            <div class="card-body">
+                <h2 class="card-title">
+                    <i class="fas fa-robot text-primary me-2"></i>Job Scraper System
+                </h2>
+                <p class="lead">Automated job data collection and analysis platform</p>
+                <hr>
+                <div class="row">
+                    <div class="col-md-6">
+                        <h4>System Status</h4>
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="bg-success rounded-circle me-2" style="width: 15px; height: 15px;"></div>
+                            <span>Web Application: <strong>Online</strong></span>
+                        </div>
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="bg-success rounded-circle me-2" style="width: 15px; height: 15px;"></div>
+                            <span>Monitoring: <strong>Active</strong></span>
+                        </div>
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="bg-success rounded-circle me-2" style="width: 15px; height: 15px;"></div>
+                            <span>Database: <strong>Connected</strong></span>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <h4>Quick Links</h4>
+                        <ul class="list-group">
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <a href="http://23.88.125.23:3000" target="_blank" class="text-decoration-none">
+                                    <i class="fas fa-chart-bar text-primary me-2"></i>Grafana Dashboards
+                                </a>
+                                <span class="badge bg-primary rounded-pill">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <a href="http://23.88.125.23:9090" target="_blank" class="text-decoration-none">
+                                    <i class="fas fa-fire-alt text-primary me-2"></i>Prometheus Metrics
+                                </a>
+                                <span class="badge bg-primary rounded-pill">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <a href="{{ url_for('health') }}" target="_blank" class="text-decoration-none">
+                                    <i class="fas fa-heartbeat text-primary me-2"></i>Health Check API
+                                </a>
+                                <span class="badge bg-primary rounded-pill">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scraper Control Panel -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow scraper-status-card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-robot me-2"></i>Scraper Control Panel
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h5>Scraper Status</h5>
+                        <div id="scraper-status">
+                            {% if scraping_status.is_running %}
+                            <div class="alert alert-info d-flex align-items-center">
+                                <div class="me-3">
+                                    <i class="fas fa-cog rotate-animation fa-2x"></i>
+                                </div>
+                                <div>
+                                    <p class="mb-0"><strong>Scraper is running</strong></p>
+                                    <small>Started at: {{ scraping_status.start_time }}</small>
+                                </div>
+                            </div>
+                            {% else %}
+                            <div class="alert alert-secondary d-flex align-items-center">
+                                <div class="me-3">
+                                    <i class="fas fa-pause fa-2x"></i>
+                                </div>
+                                <div>
+                                    <p class="mb-0"><strong>Scraper is idle</strong></p>
+                                    <small>Ready to collect job data</small>
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            <div
+                                class="scrape-details {% if scraping_status.last_completed or scraping_status.jobs_found > 0 or scraping_status.error %}show{% endif %}">
+                                {% if scraping_status.last_completed %}
+                                <div class="d-flex align-items-center mb-2">
+                                    <i class="fas fa-clock text-info me-2"></i>
+                                    <span>Last run completed: <strong>{{ scraping_status.last_completed
+                                            }}</strong></span>
+                                </div>
+                                {% endif %}
+
+                                {% if scraping_status.jobs_found > 0 %}
+                                <div class="d-flex align-items-center mb-2">
+                                    <i class="fas fa-briefcase text-success me-2"></i>
+                                    <span>Jobs found in last run: <strong>{{ scraping_status.jobs_found
+                                            }}</strong></span>
+                                </div>
+                                {% endif %}
+
+                                {% if scraping_status.error %}
+                                <div class="alert alert-danger mt-2">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>Error: {{ scraping_status.error }}
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <h5>Actions</h5>
+                        <button id="start-scraper-btn"
+                            class="btn btn-primary btn-lg mb-3 w-100 {% if not scraping_status.is_running %}pulse-animation{% endif %}"
+                            {% if scraping_status.is_running %}disabled{% endif %}>
+                            <i class="fas fa-play me-2"></i>Start Scraping Jobs
+                        </button>
+                        <div id="scraper-progress" class="d-none">
+                            <div class="progress mb-2" style="height: 25px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"
+                                    style="width: 100%">
+                                    <span id="progress-status">Initializing scraper...</span>
+                                </div>
+                            </div>
+                            <p class="text-center text-muted small" id="progress-details">
+                                Please wait while the system collects job data from various sources...
+                            </p>
+                        </div>
+                        <div class="alert alert-success d-none" id="scrape-success">
+                            <i class="fas fa-check-circle me-2"></i>Scraping completed successfully!
+                        </div>
+                        <div class="alert alert-danger d-none" id="scrape-error">
+                            <i class="fas fa-exclamation-circle me-2"></i><span id="error-message">An error
+                                occurred.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-header bg-primary text-white">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-info-circle me-2"></i>About
+                </h5>
+            </div>
+            <div class="card-body">
+                <p>
+                    The Job Scraper is an automated system for collecting, analyzing, and monitoring job listings
+                    from various online sources. It provides real-time data insights and trending analysis
+                    for the job market.
+                </p>
+                <p>
+                    Key features include:
+                </p>
+                <ul>
+                    <li>Automated data collection from job posting websites</li>
+                    <li>Database storage with comprehensive search capabilities</li>
+                    <li>Real-time monitoring and system health checks</li>
+                    <li>Data analytics and visualization through Grafana</li>
+                    <li>Backup and restore functionality</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-header bg-primary text-white">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-chart-line me-2"></i>System Stats
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-6 mb-3">
+                        <h3 class="text-primary">{{ '5,432' }}</h3>
+                        <p class="text-muted">Total Jobs</p>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <h3 class="text-success">{{ '142' }}</h3>
+                        <p class="text-muted">New Today</p>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <h3 class="text-info">{{ '98.5%' }}</h3>
+                        <p class="text-muted">Uptime</p>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <h3 class="text-warning">{{ '24' }}</h3>
+                        <p class="text-muted">Daily Scrapes</p>
+                    </div>
+                </div>
+                <hr>
+                <p class="text-center">
+                    <small class="text-muted">Last updated: {{ 'March 24, 2025 20:45' }}</small>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const startScraperBtn = document.getElementById('start-scraper-btn');
+        const scraperProgress = document.getElementById('scraper-progress');
+        const scrapeSuccess = document.getElementById('scrape-success');
+        const scrapeError = document.getElementById('scrape-error');
+        const errorMessage = document.getElementById('error-message');
+        const scraperStatus = document.getElementById('scraper-status');
+
+        // Start scraper button click handler
+        startScraperBtn.addEventListener('click', function () {
+            // Disable button and show progress
+            startScraperBtn.disabled = true;
+            scraperProgress.classList.remove('d-none');
+            scrapeSuccess.classList.add('d-none');
+            scrapeError.classList.add('d-none');
+
+            // Make API call to start scraping
+            fetch('/api/start-scrape', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Success! Now poll for status
+                        pollScraperStatus();
+                    } else {
+                        // Error starting scraper
+                        showError(data.message || 'Failed to start scraper');
+                    }
+                })
+                .catch(err => {
+                    // Network or other error
+                    showError('Network error: ' + err.message);
+                });
+        });
+
+        // Function to poll scraper status
+        function pollScraperStatus() {
+            const statusCheckInterval = setInterval(function () {
+                fetch('/api/scraper-status')
+                    .then(response => response.json())
+                    .then(status => {
+                        if (!status.is_running) {
+                            // Scraping is finished
+                            clearInterval(statusCheckInterval);
+                            scraperProgress.classList.add('d-none');
+
+                            if (status.error) {
+                                showError(status.error);
+                            } else {
+                                showSuccess(status.jobs_found);
+                            }
+
+                            // Refresh the page after success to update all stats
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 3000);
+                        }
+                        // If still running, keep polling
+                    })
+                    .catch(err => {
+                        clearInterval(statusCheckInterval);
+                        showError('Error checking status: ' + err.message);
+                    });
+            }, 1000); // Check every second
+        }
+
+        // Show error message
+        function showError(message) {
+            startScraperBtn.disabled = false;
+            scraperProgress.classList.add('d-none');
+            scrapeError.classList.remove('d-none');
+            errorMessage.textContent = message;
+        }
+
+        // Show success message
+        function showSuccess(jobCount) {
+            scraperProgress.classList.add('d-none');
+            scrapeSuccess.classList.remove('d-none');
+            scrapeSuccess.innerHTML = `<i class="fas fa-check-circle me-2"></i>Scraping completed successfully! Found ${jobCount} jobs.`;
+        }
+    });
+</script>
+{% endblock %}

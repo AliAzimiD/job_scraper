@@ -5,15 +5,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title>{% block title %}Job Scraper{% endblock %}</title>
+    <title>Job Scraper - Home</title>
 
-    {% block styles %}
+    
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="/static/css/style.css">
     <style>
         /* Base styles */
         body {
@@ -110,7 +110,7 @@
             height: 3rem;
         }
     </style>
-    {% endblock %}
+    
 </head>
 
 <body>
@@ -127,7 +127,7 @@
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container">
-            <a class="navbar-brand" href="{{ url_for('index') }}">
+            <a class="navbar-brand" href="/">
                 <i class="fas fa-search-dollar me-2"></i>Job Scraper
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
@@ -136,18 +136,13 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('index') }}">
+                        <a class="nav-link" href="/">
                             <i class="fas fa-home me-1"></i>Home
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('status') }}">
+                        <a class="nav-link" href="/status">
                             <i class="fas fa-chart-line me-1"></i>Status
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('import_export') }}">
-                            <i class="fas fa-database me-1"></i>Import/Export
                         </a>
                     </li>
                     <li class="nav-item">
@@ -167,24 +162,138 @@
 
     <!-- Flash Messages -->
     <div class="flash-messages">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-        {% for category, message in messages %}
-        <div class="flash-message alert alert-{{ category }} alert-dismissible fade show" role="alert">
-            {{ message }}
-            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
-                <span aria-hidden="true">&times;</span>
-            </button>
-        </div>
-        {% endfor %}
-        {% endif %}
-        {% endwith %}
+        
+        
+        
     </div>
 
     <!-- Main Content -->
     <main role="main">
         <div class="container">
-            {% block content %}{% endblock %}
+            
+<div class="row">
+    <div class="col-md-12 mb-4">
+        <div class="card shadow">
+            <div class="card-body">
+                <h2 class="card-title">
+                    <i class="fas fa-robot text-primary me-2"></i>Job Scraper System
+                </h2>
+                <p class="lead">Automated job data collection and analysis platform</p>
+                <hr>
+                <div class="row">
+                    <div class="col-md-6">
+                        <h4>System Status</h4>
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="bg-success rounded-circle me-2" style="width: 15px; height: 15px;"></div>
+                            <span>Web Application: <strong>Online</strong></span>
+                        </div>
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="bg-success rounded-circle me-2" style="width: 15px; height: 15px;"></div>
+                            <span>Monitoring: <strong>Active</strong></span>
+                        </div>
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="bg-success rounded-circle me-2" style="width: 15px; height: 15px;"></div>
+                            <span>Database: <strong>Connected</strong></span>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <h4>Quick Links</h4>
+                        <ul class="list-group">
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <a href="http://23.88.125.23:3000" target="_blank" class="text-decoration-none">
+                                    <i class="fas fa-chart-bar text-primary me-2"></i>Grafana Dashboards
+                                </a>
+                                <span class="badge bg-primary rounded-pill">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <a href="http://23.88.125.23:9090" target="_blank" class="text-decoration-none">
+                                    <i class="fas fa-fire-alt text-primary me-2"></i>Prometheus Metrics
+                                </a>
+                                <span class="badge bg-primary rounded-pill">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <a href="/health" target="_blank" class="text-decoration-none">
+                                    <i class="fas fa-heartbeat text-primary me-2"></i>Health Check API
+                                </a>
+                                <span class="badge bg-primary rounded-pill">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-header bg-primary text-white">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-info-circle me-2"></i>About
+                </h5>
+            </div>
+            <div class="card-body">
+                <p>
+                    The Job Scraper is an automated system for collecting, analyzing, and monitoring job listings
+                    from various online sources. It provides real-time data insights and trending analysis
+                    for the job market.
+                </p>
+                <p>
+                    Key features include:
+                </p>
+                <ul>
+                    <li>Automated data collection from job posting websites</li>
+                    <li>Database storage with comprehensive search capabilities</li>
+                    <li>Real-time monitoring and system health checks</li>
+                    <li>Data analytics and visualization through Grafana</li>
+                    <li>Backup and restore functionality</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 mb-4">
+        <div class="card shadow h-100">
+            <div class="card-header bg-primary text-white">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-chart-line me-2"></i>System Stats
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-6 mb-3">
+                        <h3 class="text-primary">5,432</h3>
+                        <p class="text-muted">Total Jobs</p>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <h3 class="text-success">142</h3>
+                        <p class="text-muted">New Today</p>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <h3 class="text-info">98.5%</h3>
+                        <p class="text-muted">Uptime</p>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <h3 class="text-warning">24</h3>
+                        <p class="text-muted">Daily Scrapes</p>
+                    </div>
+                </div>
+                <hr>
+                <p class="text-center">
+                    <small class="text-muted">Last updated: March 24, 2025 20:45</small>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
         </div>
     </main>
 
@@ -192,7 +301,7 @@
     <footer class="bg-light py-4 mt-5">
         <div class="container text-center">
             <p class="mb-0">
-                &copy; {{ current_year if current_year else '2025' }} Job Scraper Project |
+                &copy; 2025 Job Scraper Project |
                 <a href="https://github.com/yourusername/job-scraper" target="_blank">
                     <i class="fab fa-github"></i> GitHub
                 </a>
@@ -203,8 +312,8 @@
     <!-- Bootstrap Bundle with Popper -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <!-- Custom JavaScript -->
-    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
-    {% block scripts %}
+    <script src="/static/js/script.js"></script>
+    
     <script>
         // Auto-fade flash messages after 5 seconds
         $(document).ready(function () {
@@ -241,7 +350,7 @@
             }
         }
     </script>
-    {% endblock %}
+    
 </body>
 
 </html>

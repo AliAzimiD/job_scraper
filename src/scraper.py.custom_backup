@@ -179,7 +179,7 @@ class JobScraper:
         """
         try:
             self.logger.info(f"Fetching page {page} from {self.base_url}")
-        async with self.semaphore:
+            async with self.semaphore:
                 try:
                     start_time = time.time()
                     # Get timeout from config or use default
@@ -188,12 +188,12 @@ class JobScraper:
                         connect=self.scraper_config.get("connect_timeout", 20)
                     )
                     
-            async with session.post(
-                self.base_url,
-                headers=self.headers,
-                json=json_body,
+                    async with session.post(
+                        self.base_url,
+                        headers=self.headers,
+                        json=json_body,
                         timeout=timeout,
-            ) as response:
+                    ) as response:
                         elapsed = time.time() - start_time
                         self.logger.debug(f"Request to page {page} took {elapsed:.2f}s")
                         
@@ -226,7 +226,7 @@ class JobScraper:
                         
                         # Try to parse JSON response
                         try:
-                data = await response.json()
+                            data = await response.json()
                             
                             # Validate basic structure of the response
                             if not isinstance(data, dict):
@@ -1325,7 +1325,7 @@ class JobScraper:
         self.logger.info("Scraping completed. Final statistics:")
         for k, v in stats.items():
             if k != "failed_request_pages":  # Skip verbose list
-            self.logger.info(f"{k}: {v}")
+                    self.logger.info(f"{k}: {v}")
 
         # If there were failed requests, log them in detail
         if self.failed_requests:
@@ -1459,7 +1459,7 @@ class JobScraper:
             # Close DB connections if used
             if self.db_enabled and self.db_manager:
                 try:
-                await self.db_manager.close()
+                            await self.db_manager.close()
                 except Exception as e:
                     self.logger.error(f"Error closing database connection: {str(e)}")
 

@@ -317,6 +317,45 @@ You can access the Superset interface in two ways:
 1. **Through the main application**: Navigate to the "Analytics" section in the main menu
 2. **Direct access**: Access Superset directly at http://localhost:8088 (default credentials: admin/admin)
 
+## User Interface
+
+The Job Scraper application features a modern, responsive web interface built with:
+
+- **Bootstrap 5** for responsive layouts and components
+- **Font Awesome** for icons
+- **Custom CSS/JS** for animations and enhancements
+
+### Key UI Features
+
+- **Responsive Design**: Fully functional on desktop and mobile devices
+- **Dashboard**: Real-time overview of system status and key metrics
+- **Status Page**: Detailed system monitoring with resource usage statistics
+- **Animated Components**: Smooth transitions and loading effects
+- **Dark/Light Mode**: Support for system color scheme preferences
+
+### Templates
+
+The UI is built using Jinja2 templates:
+
+- `base.html`: The main template that other templates extend
+- `index.html`: Home page with system overview and quick access links
+- `status.html`: Detailed system status with real-time monitoring
+
+### Accessing the UI
+
+- **Production**: http://your-server-ip:5000
+- **Development**: http://localhost:5000 (when running locally)
+
+The monitoring interfaces can be accessed at:
+
+- **Grafana**: http://your-server-ip:3000 (default login: admin/admin)
+- **Prometheus**: http://your-server-ip:9090
+
+### Screenshots
+
+![Dashboard Screenshot](docs/images/dashboard.png)
+![Status Page Screenshot](docs/images/status_page.png)
+
 ## License
 
 MIT License
