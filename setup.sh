@@ -1339,7 +1339,7 @@ EOF
             log "ERROR" "Failed to restart Nginx"
             exit 1
         }
-    }
+    fi
     
     log "SUCCESS" "Apache Superset (Docker) set up successfully"
     log "INFO" "Superset admin credentials:"
