@@ -223,6 +223,12 @@ install_dependencies() {
         log "INFO" "Installing Docker and Docker Compose"
         install_docker
     else
+        # Add PostgreSQL repository
+        log "INFO" "Setting up PostgreSQL repository"
+        wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg
+        sh -c 'echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+        apt-get update -qq
+        
         # Install PostgreSQL
         log "INFO" "Installing PostgreSQL $POSTGRES_VERSION"
         apt-get install -y -qq "${postgres_packages[@]}" || {
