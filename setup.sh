@@ -950,7 +950,7 @@ setup_superset() {
     
     # Initialize Superset database
     log "INFO" "Initializing Superset database"
-    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && superset db upgrade" || {
+    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && export FLASK_APP=superset && superset db upgrade" || {
         log "ERROR" "Failed to initialize Superset database"
         exit 1
     }
@@ -970,7 +970,7 @@ setup_superset() {
     
     # Load examples and initialize roles
     log "INFO" "Setting up Superset initial configuration"
-    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && superset init" || {
+    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && export FLASK_APP=superset && superset init" || {
         log "WARNING" "Failed to initialize Superset examples"
     }
     
@@ -1260,28 +1260,28 @@ echo "Waiting for Superset to be ready..."
 sleep 10
 
 # Initialize Superset database
-docker exec -it superset superset db upgrade
+docker exec -it superset bash -c "export FLASK_APP=superset && superset db upgrade"
 
 # Create admin user if not exists
-docker exec -it superset superset fab create-admin \
-    --username "$ADMIN_USERNAME" \
+docker exec -it superset bash -c "export FLASK_APP=superset && superset fab create-admin \
+    --username \"$ADMIN_USERNAME\" \
     --firstname Admin \
     --lastname User \
-    --email "$ADMIN_EMAIL" \
-    --password "$ADMIN_PASSWORD"
+    --email \"$ADMIN_EMAIL\" \
+    --password \"$ADMIN_PASSWORD\""
 
 # Initialize Superset roles and examples
-docker exec -it superset superset init
+docker exec -it superset bash -c "export FLASK_APP=superset && superset init"
 
 # Add Job Scraper database to Superset
-docker exec -it superset superset set-database-uri \
-    --database-name "Job Scraper DB" \
-    --uri "postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME" \
+docker exec -it superset bash -c "export FLASK_APP=superset && superset set-database-uri \
+    --database-name \"Job Scraper DB\" \
+    --uri \"postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME\" \
     --expose-in-sqllab \
     --allow-run-async \
     --allow-ctas \
     --allow-cvas \
-    --allow-dml
+    --allow-dml"
 
 echo "Superset initialization completed!"
 EOF
