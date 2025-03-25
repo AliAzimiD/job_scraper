@@ -206,14 +206,14 @@ update_system_packages() {
 install_dependencies() {
     section "Installing Dependencies"
     
-    local base_packages="curl wget git software-properties-common apt-transport-https ca-certificates gnupg lsb-release unzip build-essential libssl-dev libffi-dev python3-dev python3-pip python3-venv"
-    local postgres_packages="postgresql-$POSTGRES_VERSION postgresql-contrib postgresql-client-$POSTGRES_VERSION"
-    local nginx_packages="nginx certbot python3-certbot-nginx"
-    local redis_packages="redis-server"
-    local monitoring_packages="prometheus-node-exporter"
+    local base_packages=(curl wget git software-properties-common apt-transport-https ca-certificates gnupg lsb-release unzip build-essential libssl-dev libffi-dev python3-dev python3-pip python3-venv)
+    local postgres_packages=(postgresql-$POSTGRES_VERSION postgresql-contrib postgresql-client-$POSTGRES_VERSION)
+    local nginx_packages=(nginx certbot python3-certbot-nginx)
+    local redis_packages=(redis-server)
+    local monitoring_packages=(prometheus-node-exporter)
     
     log "INFO" "Installing base packages"
-    apt-get install -y -qq $base_packages || {
+    apt-get install -y -qq "${base_packages[@]}" || {
         log "ERROR" "Failed to install base packages"
         exit 1
     }
@@ -225,14 +225,14 @@ install_dependencies() {
     else
         # Install PostgreSQL
         log "INFO" "Installing PostgreSQL $POSTGRES_VERSION"
-        apt-get install -y -qq $postgres_packages || {
+        apt-get install -y -qq "${postgres_packages[@]}" || {
             log "ERROR" "Failed to install PostgreSQL"
             exit 1
         }
         
         # Install Redis
         log "INFO" "Installing Redis"
-        apt-get install -y -qq $redis_packages || {
+        apt-get install -y -qq "${redis_packages[@]}" || {
             log "ERROR" "Failed to install Redis"
             exit 1
         }
@@ -240,7 +240,7 @@ install_dependencies() {
         # Install Nginx if needed
         if [[ "$USE_NGINX" == "true" ]]; then
             log "INFO" "Installing Nginx and Certbot"
-            apt-get install -y -qq $nginx_packages || {
+            apt-get install -y -qq "${nginx_packages[@]}" || {
                 log "ERROR" "Failed to install Nginx and Certbot"
                 exit 1
             }
@@ -249,7 +249,7 @@ install_dependencies() {
     
     # Install monitoring tools
     log "INFO" "Installing monitoring tools"
-    apt-get install -y -qq $monitoring_packages || {
+    apt-get install -y -qq "${monitoring_packages[@]}" || {
         log "WARNING" "Failed to install monitoring tools, continuing anyway"
     }
     
