@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Job Scraper{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="card-title">Job Scraper Dashboard</h2>
+                <p class="card-text">Welcome to the Job Scraper application dashboard. From here you can manage scraping
+                    jobs, view status, and more.</p>
+
+                <div class="d-grid gap-2 d-md-flex justify-content-md-start mt-3">
+                    <button id="start-scrape-btn" class="btn btn-primary me-md-2">
+                        <i class="bi bi-play-fill"></i> Start Scraping
+                    </button>
+                    <a href="/status" class="btn btn-outline-secondary">
+                        <i class="bi bi-graph-up"></i> View Status
+                    </a>
+                    <a href="/import_export" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-down-up"></i> Import/Export
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="card shadow-sm stats-card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="card-title text-muted">Total Jobs</h5>
+                        <h2 class="card-text" id="total-jobs">0</h2>
+                    </div>
+                    <i class="bi bi-briefcase fs-1 text-primary"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm stats-card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="card-title text-muted">Last Scrape</h5>
+                        <h2 class="card-text" id="last-scrape">Never</h2>
+                    </div>
+                    <i class="bi bi-clock-history fs-1 text-info"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm stats-card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="card-title text-muted">Status</h5>
+                        <h2 class="card-text" id="scraper-status">Idle</h2>
+                    </div>
+                    <i class="bi bi-activity fs-1 text-success"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Scraping Activity</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="activity-chart" height="300"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Recent Jobs</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush" id="recent-jobs-list">
+                    <li class="list-group-item text-center text-muted">No jobs yet</li>
+                </ul>
+            </div>
+            <div class="card-footer">
+                <a href="#" class="btn btn-sm btn-outline-primary">View All Jobs</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Start scraping button
+        const startScrapeBtn = document.getElementById('start-scrape-btn');
+        startScrapeBtn.addEventListener('click', function () {
+            startScraping();
+        });
+
+        // Initialize the activity chart
+        const ctx = document.getElementById('activity-chart').getContext('2d');
+        const activityChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['7 days ago', '6 days ago', '5 days ago', '4 days ago', '3 days ago', '2 days ago', 'Yesterday'],
+                datasets: [{
+                    label: 'Jobs Scraped',
+                    data: [12, 19, 3, 5, 2, 3, 8],
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Jobs'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    }
+                }
+            }
+        });
+
+        // Update stats every 5 seconds
+        updateStats();
+        setInterval(updateStats, 5000);
+
+        // Mock data for recent jobs
+        setTimeout(() => {
+            updateRecentJobs([
+                { id: 1, title: 'Software Engineer', company: 'Tech Co' },
+                { id: 2, title: 'Data Analyst', company: 'Data Corp' },
+                { id: 3, title: 'UX Designer', company: 'Design Inc' }
+            ]);
+        }, 1500);
+    });
+
+    function updateStats() {
+        // In a real application, this would fetch data from the server
+        fetch('/api/scraper-status')
+            .then(response => response.json())
+            .then(data => {
+                // Update stats on the page
+                document.getElementById('total-jobs').textContent = data.jobs_found || 0;
+
+                if (data.start_time) {
+                    document.getElementById('last-scrape').textContent = new Date(data.start_time).toLocaleString();
+                }
+
+                const statusElement = document.getElementById('scraper-status');
+                statusElement.textContent = data.status ? data.status.charAt(0).toUpperCase() + data.status.slice(1) : 'Idle';
+
+                // Change color based on status
+                if (data.running) {
+                    statusElement.classList.add('text-primary');
+                    statusElement.classList.remove('text-success', 'text-danger', 'text-secondary');
+                } else if (data.status === 'completed') {
+                    statusElement.classList.add('text-success');
+                    statusElement.classList.remove('text-primary', 'text-danger', 'text-secondary');
+                } else if (data.status === 'error') {
+                    statusElement.classList.add('text-danger');
+                    statusElement.classList.remove('text-primary', 'text-success', 'text-secondary');
+                } else {
+                    statusElement.classList.add('text-secondary');
+                    statusElement.classList.remove('text-primary', 'text-success', 'text-danger');
+                }
+
+                // Update button state
+                const startScrapeBtn = document.getElementById('start-scrape-btn');
+                if (data.running) {
+                    startScrapeBtn.disabled = true;
+                    startScrapeBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Scraping...';
+                } else {
+                    startScrapeBtn.disabled = false;
+                    startScrapeBtn.innerHTML = '<i class="bi bi-play-fill"></i> Start Scraping';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching scraper status:', error);
+            });
+    }
+
+    function updateRecentJobs(jobs) {
+        const recentJobsList = document.getElementById('recent-jobs-list');
+
+        if (!jobs || jobs.length === 0) {
+            recentJobsList.innerHTML = '<li class="list-group-item text-center text-muted">No jobs yet</li>';
+            return;
+        }
+
+        recentJobsList.innerHTML = '';
+        jobs.forEach(job => {
+            recentJobsList.innerHTML += `
+                <li class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>${job.title}</strong>
+                            <div class="text-muted">${job.company}</div>
+                        </div>
+                        <a href="#" class="btn btn-sm btn-outline-primary">View</a>
+                    </div>
+                </li>
+            `;
+        });
+    }
+
+    function startScraping() {
+        // Disable the button
+        const startScrapeBtn = document.getElementById('start-scrape-btn');
+        startScrapeBtn.disabled = true;
+        startScrapeBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Starting...';
+
+        // Call the API to start scraping
+        fetch('/api/start-scrape', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                max_pages: 10
+            })
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Scraping started successfully');
+                    updateStats();
+                } else {
+                    console.error('Error starting scraper:', data.message);
+                    alert('Error: ' + data.message);
+                    startScrapeBtn.disabled = false;
+                    startScrapeBtn.innerHTML = '<i class="bi bi-play-fill"></i> Start Scraping';
+                }
+            })
+            .catch(error => {
+                console.error('Error starting scraper:', error);
+                alert('Error starting scraper. See console for details.');
+                startScrapeBtn.disabled = false;
+                startScrapeBtn.innerHTML = '<i class="bi bi-play-fill"></i> Start Scraping';
+            });
+    }
+</script>
+{% endblock %}

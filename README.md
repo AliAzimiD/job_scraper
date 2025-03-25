@@ -1,370 +1,161 @@
 # Job Scraper Application
 
-A modern, well-structured application for scraping job postings from various sources, storing them in a PostgreSQL database, and providing a web interface and API for data management and analysis.
+A full-featured job scraper application built with Python Flask, PostgreSQL, and Redis.
 
-## Features
+## Overview
 
-- Asynchronous job scraping with rate limiting and retry logic
-- RESTful API for job data management
-- Web interface with dashboard for statistics and management
-- **Advanced job search with filtering and export options**
-- **Advanced data visualization with Apache Superset integration**
-- Data export/import in various formats (JSON, CSV, Parquet, Excel)
-- Database backup and restore functionality
-- **Robust error handling with retry logic and fallback mechanisms**
-- **Enhanced data validation for job entries**
-- **User-friendly configuration interface**
-- **Comprehensive monitoring with Prometheus and Grafana**
-- Comprehensive error handling and logging
-- Authentication for API endpoints
-- Containerized with Docker and Docker Compose
+The Job Scraper application is designed to scrape job listings from various job boards, store them in a PostgreSQL database, and provide a web interface for browsing, searching, and exporting the collected data.
 
-## Requirements
+## Key Features
+
+- **Job Scraping**: Automated scraping of job listings from multiple sources
+- **Web Interface**: Flask-based dashboard to view, search, and manage job listings
+- **Data Export/Import**: Export job data to CSV/JSON and import from external sources
+- **Monitoring**: Integrated health checks and Prometheus metrics for observability
+- **Containerization**: Docker setup for easy deployment and scaling
+
+## Architecture
+
+The application follows a modular architecture with the following components:
+
+- **Web Interface**: Flask application with templates and static assets
+- **Scraper Module**: Core scraping functionality with configurable job sources
+- **Database Layer**: PostgreSQL storage with SQLAlchemy ORM
+- **Caching Layer**: Redis for performance optimization
+- **Monitoring**: Prometheus metrics and health check endpoints
+
+## Prerequisites
 
 - Python 3.10+
 - PostgreSQL 13+
-- Docker and Docker Compose (optional)
-
-## Project Structure
-
-The application follows a modular, clean architecture approach:
-
-```
-job-scraper/
-├── config/                  # Configuration files
-│   └── api_config.yaml      # Main application configuration
-├── docker/                  # Docker-related files
-│   ├── Dockerfile           # Application Dockerfile
-│   └── postgres/            # PostgreSQL initialization scripts
-├── init-db/                 # Database initialization scripts
-├── scripts/                 # Utility scripts
-├── src/                     # Source code
-│   ├── static/              # Static assets
-│   ├── templates/           # HTML templates
-│   │   ├── base.html        # Base template
-│   │   ├── dashboard.html   # Dashboard template
-│   │   ├── search.html      # Job search interface
-│   │   ├── job_details.html # Job details view
-│   │   └── scraper_config.html # Scraper configuration interface
-│   ├── config_manager.py    # Configuration management
-│   ├── data_manager.py      # Data export/import management
-│   ├── db_manager.py        # Database connection management
-│   ├── filters.py           # Template filters
-│   ├── log_setup.py         # Logging configuration
-│   ├── scraper.py           # Job scraper logic
-│   └── web_app.py           # Flask web application
-├── tests/                   # Test suite
-├── .env.example             # Example environment variables
-├── docker-compose.yml       # Docker Compose configuration
-├── Dockerfile               # Production Dockerfile
-├── Dockerfile.dev           # Development Dockerfile
-├── README.md                # This file
-└── requirements.txt         # Python dependencies
-```
+- Redis 6+
+- Docker and Docker Compose (for containerized deployment)
 
 ## Installation
 
-### Using Docker (Recommended)
+### Local Development Setup
 
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/job-scraper.git
-   cd job-scraper
-   ```
 
-2. Create a `.env` file from the example:
-   ```bash
-   cp .env.example .env
-   ```
-
-3. Edit the `.env` file with your settings.
-
-4. Build and start the containers:
-   ```bash
-   docker-compose up -d
-   ```
-
-The application will be available at http://localhost:5000
-
-### Manual Installation
-
-1. Clone the repository:
    ```bash
    git clone https://github.com/yourusername/job-scraper.git
    cd job-scraper
    ```
 
 2. Create and activate a virtual environment:
+
    ```bash
-   python -m venv venv
+   python3 -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 3. Install dependencies:
+
    ```bash
    pip install -r requirements.txt
    ```
 
-4. Set up PostgreSQL database:
+4. Set up environment variables:
+
    ```bash
-   createdb jobsdb
+   cp .env.example .env
+   # Edit .env with your configuration values
    ```
 
-5. Create a `.env` file with your configuration:
-   ```
-   FLASK_ENV=development
-   FLASK_DEBUG=True
-   POSTGRES_HOST=localhost
-   POSTGRES_PORT=5432
-   POSTGRES_DB=jobsdb
-   POSTGRES_USER=your_username
-   POSTGRES_PASSWORD=your_password
-   FLASK_SECRET_KEY=generate_a_random_secret_key
-   API_USERNAME=api_user
-   API_PASSWORD=secure_password
+5. Initialize the database:
+
+   ```bash
+   # Ensure PostgreSQL is running
+   python3 -m app.db.init_db
    ```
 
 6. Run the application:
+
    ```bash
-   python -m src.main
+   python3 main.py
    ```
+
+### Docker Deployment
+
+1. Build and start containers:
+
+   ```bash
+   docker-compose up -d
+   ```
+
+2. Access the application at <http://localhost:5000>
 
 ## Usage
 
 ### Web Interface
 
-The application provides a web interface with the following sections:
+The web interface provides the following features:
 
-- **Dashboard**: Overview of job statistics and recent job listings
-- **Search Jobs**: Advanced job search with filtering and export options
-- **Scraper Control**: Start, stop, and monitor job scraping operations
-- **Data Management**: Export, import, backup, and restore job data
-- **Configure Scraper**: User-friendly configuration interface
+- **Dashboard**: Overview of scraping status and job statistics
+- **Job Listings**: Browse and search collected job listings
+- **Export**: Export job data to various formats
+- **Import**: Import job data from external sources
+- **Scraper Control**: Start, stop, and monitor scraping jobs
 
-Access the web interface at http://localhost:5000
+### API Endpoints
 
-### Search Interface
+The application exposes the following API endpoints:
 
-The search interface allows you to find jobs using various criteria:
-
-- **Keyword**: Search in job titles and descriptions
-- **Location**: Filter by location
-- **Company**: Filter by company name
-- **Posted Within**: Filter by posting date (last 24 hours, 7 days, 30 days, etc.)
-- **Sort By**: Sort results by date, relevance, or company
-- **Results Per Page**: Control the number of results displayed
-
-Search results can be exported in CSV, JSON, or Excel formats with a single click.
-
-### Scraper Configuration
-
-The scraper configuration interface allows you to adjust settings without editing files:
-
-- **Request Settings**: Max pages, batch size, timeout, user agent, etc.
-- **Retry & Error Handling**: Retry counts, delay, failure thresholds
-- **Storage Options**: Raw data storage options
-
-### API
-
-The application provides a RESTful API for programmatic access:
-
-#### Authentication
-
-All API endpoints (except health check) require Basic Authentication.
-
-#### Endpoints
-
-- `GET /api/health`: Health check endpoint
-- `GET /api/jobs`: Get job listings with filters
-- `GET /api/jobs/<job_id>`: Get a specific job
-- `POST /api/jobs`: Create a new job
-- `GET /api/stats`: Get job statistics
-- `GET /api/search`: Advanced job search
-- `GET /export_search/<format>`: Export search results in various formats
-
-Detailed API documentation is available at http://localhost:5000/docs when the application is running.
+- `GET /api/jobs`: Get a list of jobs with optional filtering
+- `GET /api/jobs/{id}`: Get details for a specific job
+- `POST /api/start-scrape`: Start a new scraping job
+- `POST /api/stop-scrape`: Stop the current scraping job
+- `GET /api/status`: Get the current status of the scraper
+- `GET /api/export`: Export job data to CSV/JSON
+- `POST /api/import`: Import job data from an external source
+- `GET /health`: Health check endpoint
+- `GET /metrics`: Prometheus metrics endpoint
 
 ## Configuration
 
-### Environment Variables
+Configuration is managed through YAML files in the `config/` directory:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `FLASK_ENV` | Application environment | `production` |
-| `FLASK_DEBUG` | Enable debug mode | `False` |
-| `FLASK_HOST` | Host to bind | `0.0.0.0` |
-| `FLASK_PORT` | Port to bind | `5000` |
-| `POSTGRES_HOST` | PostgreSQL host | `localhost` |
-| `POSTGRES_PORT` | PostgreSQL port | `5432` |
-| `POSTGRES_DB` | PostgreSQL database name | `jobsdb` |
-| `POSTGRES_USER` | PostgreSQL username | `jobuser` |
-| `POSTGRES_PASSWORD` | PostgreSQL password | `devpassword` |
-| `DATABASE_URL` | Full database URL (overrides individual settings) | |
-| `LOG_LEVEL` | Logging level | `INFO` |
-| `LOG_DIR` | Directory for log files | `logs` |
-| `CONFIG_PATH` | Path to configuration file | `config/api_config.yaml` |
+- `app_config.yaml`: General application settings
+- `api_config.yaml`: API-specific settings
+- `logging_config.yaml`: Logging configuration
 
-### Configuration File
-
-The application uses a YAML configuration file for scraper settings and other options. See `config/api_config.yaml` for details. Configuration can be modified through the web interface or by editing the file directly.
-
-## Error Handling and Resilience
-
-The application includes several mechanisms to ensure data integrity and operational resilience:
-
-- **Connection Retry**: Automatic reconnection to database with exponential backoff
-- **Job Processing Retry**: Multiple attempts for job insertion with increasing delay
-- **Data Validation**: Comprehensive validation of job data before database insertion
-- **Fallback Mechanisms**: Jobs are saved to disk if database operations fail
-- **Sample Data Preservation**: Problematic jobs are stored separately for debugging
-- **Detailed Logging**: Comprehensive logging of errors and operations
-- **Performance Metrics**: Tracking of processing time and success rates
+Environment-specific settings can be overridden using environment variables defined in the `.env` file.
 
 ## Monitoring and Observability
 
-The application comes with a comprehensive monitoring stack based on Prometheus and Grafana:
+The application includes built-in monitoring capabilities:
 
-- **Real-time Metrics**: Job counts, error rates, API performance, and system resource usage
-- **Custom Dashboards**: Pre-configured Grafana dashboards for job scraper analytics
-- **Alerting**: Configurable alerts for error thresholds, service availability, and resource usage
-- **Multi-level Monitoring**: Application metrics, database metrics, Redis metrics, and system metrics
-- **Exporters**: PostgreSQL, Redis, and system metrics exporters included
+- **Health Checks**: `/health` endpoint for application health status
+- **Prometheus Metrics**: `/metrics` endpoint for Prometheus metrics
+- **Structured Logging**: Detailed logs using the Python logging module
 
-### Starting the Monitoring Stack
+## Database Structure
 
-```bash
-# Start the monitoring services
-./start_monitoring.sh
-```
+The core database tables include:
 
-### Accessing Monitoring Dashboards
-
-- **Prometheus**: http://localhost:9090
-- **Grafana**: http://localhost:3000 (default credentials: admin/admin)
-
-For detailed information about the monitoring setup, see [MONITORING.md](MONITORING.md).
-
-## Development
-
-### Running Tests
-
-```bash
-pytest
-```
-
-### Running with Debug Mode
-
-```bash
-FLASK_DEBUG=True python -m src.main
-```
-
-### Code Quality
-
-This project follows PEP 8 style guidelines and uses:
-
-- Black for code formatting
-- isort for import sorting
-- flake8 for linting
-- mypy for type checking
-
-You can run all checks with:
-
-```bash
-black src tests
-isort src tests
-flake8 src tests
-mypy src
-```
-
-## Recent Improvements
-
-Recent enhancements to the application include:
-
-1. **Advanced Search Interface**: User-friendly search with multiple filtering options
-2. **Job Details View**: Comprehensive view of job details with formatting
-3. **Export Functionality**: Export search results in multiple formats
-4. **Configuration UI**: Web interface for adjusting scraper settings
-5. **Improved Error Handling**: Robust retry logic with fallback mechanisms
-6. **Enhanced Data Validation**: Better validation of job data before storage
-7. **Template Filters**: Formatting of dates, currencies, and other data
-8. **Dashboard Enhancements**: Quick search and better layout
-
-## Analytics with Apache Superset
-
-The application includes integration with Apache Superset for advanced data visualization and analytics:
-
-### Features
-
-- **Interactive Dashboards**: Explore job data with pre-built interactive dashboards
-- **Custom SQL Queries**: Run ad-hoc SQL queries against the job database
-- **Rich Visualizations**: Create charts, graphs, and other visualizations to analyze job market trends
-- **Embedded Analytics**: Access Superset dashboards directly from the main application interface
-- **Custom Filters**: Filter data by date, location, company, and other fields
-- **Export Options**: Export visualizations and data in various formats
-
-### Default Dashboards
-
-The Superset integration includes several pre-built dashboards:
-
-1. **Job Market Trends**: Overview of job posting trends, volume, and patterns
-2. **Salary Analysis**: Analysis of salary distributions across different job categories and locations
-3. **Company Insights**: Company hiring patterns and job distribution
-
-### Accessing Superset
-
-You can access the Superset interface in two ways:
-
-1. **Through the main application**: Navigate to the "Analytics" section in the main menu
-2. **Direct access**: Access Superset directly at http://localhost:8088 (default credentials: admin/admin)
-
-## User Interface
-
-The Job Scraper application features a modern, responsive web interface built with:
-
-- **Bootstrap 5** for responsive layouts and components
-- **Font Awesome** for icons
-- **Custom CSS/JS** for animations and enhancements
-
-### Key UI Features
-
-- **Responsive Design**: Fully functional on desktop and mobile devices
-- **Dashboard**: Real-time overview of system status and key metrics
-- **Status Page**: Detailed system monitoring with resource usage statistics
-- **Animated Components**: Smooth transitions and loading effects
-- **Dark/Light Mode**: Support for system color scheme preferences
-
-### Templates
-
-The UI is built using Jinja2 templates:
-
-- `base.html`: The main template that other templates extend
-- `index.html`: Home page with system overview and quick access links
-- `status.html`: Detailed system status with real-time monitoring
-
-### Accessing the UI
-
-- **Production**: http://your-server-ip:5000
-- **Development**: http://localhost:5000 (when running locally)
-
-The monitoring interfaces can be accessed at:
-
-- **Grafana**: http://your-server-ip:3000 (default login: admin/admin)
-- **Prometheus**: http://your-server-ip:9090
-
-### Screenshots
-
-![Dashboard Screenshot](docs/images/dashboard.png)
-![Status Page Screenshot](docs/images/status_page.png)
-
-## License
-
-MIT License
+- `jobs`: Stores job listings with details like title, company, location, etc.
+- `companies`: Information about companies posting jobs
+- `scrape_runs`: Records of scraping jobs with timestamps and statistics
+- `users`: User accounts for the web interface (if authentication is enabled)
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
 ## Acknowledgements
 
-- Thanks to all contributors who have helped improve this project
-- Built with Flask, SQLAlchemy, asyncio, and other excellent open source technologies
+- [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/) for HTML parsing
+- [Flask](https://flask.palletsprojects.com/) for the web framework
+- [SQLAlchemy](https://www.sqlalchemy.org/) for database ORM
+- [Prometheus](https://prometheus.io/) for metrics collection
+- [Bootstrap](https://getbootstrap.com/) for the web interface

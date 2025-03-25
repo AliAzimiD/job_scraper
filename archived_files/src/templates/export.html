@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}Export Data - Job Scraper{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Export Data</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header bg-primary text-white">
+        <i class="fas fa-file-export mr-2"></i> Export Job Data
+    </div>
+    <div class="card-body">
+        <form action="{{ url_for('export_data') }}" method="post">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="form-group">
+                        <label for="format">Export Format:</label>
+                        <select class="form-control" id="format" name="format">
+                            <option value="json">JSON</option>
+                            <option value="csv">CSV</option>
+                            <option value="parquet">Parquet</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="limit">Record Limit (0 for all):</label>
+                        <input type="number" class="form-control" id="limit" name="limit" min="0" value="0">
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input type="checkbox" class="form-check-input" id="compress" name="compress" checked>
+                        <label class="form-check-label" for="compress">Compress Output File</label>
+                    </div>
+                </div>
+                
+                <div class="col-md-6">
+                    <h5>Filter Options</h5>
+                    
+                    <div class="form-group">
+                        <label for="date_from">From Date:</label>
+                        <input type="date" class="form-control" id="date_from" name="date_from">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="date_to">To Date:</label>
+                        <input type="date" class="form-control" id="date_to" name="date_to">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="keywords">Keywords (in title or description):</label>
+                        <input type="text" class="form-control" id="keywords" name="keywords" placeholder="e.g. Python, Developer">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-file-export mr-1"></i> Export Data
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header bg-primary text-white">
+        <i class="fas fa-history mr-2"></i> Recent Exports
+    </div>
+    <div class="card-body">
+        <div id="recent-exports">
+            <div class="d-flex justify-content-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // Populate today's date in the "To Date" field
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('date_to').value = today;
+        
+        // Set "From Date" to one month ago by default
+        const oneMonthAgo = new Date();
+        oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+        document.getElementById('date_from').value = oneMonthAgo.toISOString().split('T')[0];
+        
+        // Load recent exports
+        fetch('/api/stats')
+            .then(response => response.json())
+            .then(data => {
+                const recentExportsDiv = document.getElementById('recent-exports');
+                
+                // Check if there are exports
+                if (data.last_export) {
+                    const exportTable = document.createElement('table');
+                    exportTable.className = 'table table-hover';
+                    
+                    // Create table header
+                    const thead = document.createElement('thead');
+                    thead.innerHTML = `
+                        <tr>
+                            <th>Date</th>
+                            <th>Exports Count</th>
+                            <th>Last Export</th>
+                        </tr>
+                    `;
+                    exportTable.appendChild(thead);
+                    
+                    // Create table body
+                    const tbody = document.createElement('tbody');
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${new Date(data.last_export).toLocaleString()}</td>
+                        <td>${data.exports || 0}</td>
+                        <td>
+                            <a href="/download/${data.last_export_file}" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-download"></i> Download
+                            </a>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                    exportTable.appendChild(tbody);
+                    
+                    // Replace loading spinner with table
+                    recentExportsDiv.innerHTML = '';
+                    recentExportsDiv.appendChild(exportTable);
+                } else {
+                    recentExportsDiv.innerHTML = '<div class="alert alert-info">No recent exports found.</div>';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching export stats:', error);
+                document.getElementById('recent-exports').innerHTML = 
+                    '<div class="alert alert-danger">Error loading recent exports.</div>';
+            });
+    });
+</script>
+{% endblock %} 

@@ -1,0 +1,140 @@
+You're an AI assistant embedded in Cursor IDE, helping to write or modify Python code for a job scraper application. 
+
+# Application Context
+This project is a job scraper application built with:
+- Python Flask for the web interface
+- PostgreSQL for data storage
+- Redis for caching
+- Docker for containerization
+- Prometheus and Grafana for monitoring
+
+# Coding Standards
+Follow these standards for all code contributions:
+
+## General Python Guidelines
+- Follow PEP 8 style guidelines
+- Use 4 spaces for indentation
+- Keep lines under 100 characters
+- Use docstrings for all functions, classes, and modules (Google style docstrings)
+- Add type hints to all function parameters and return values
+- Prefer explicit error handling with try/except blocks
+- Use f-strings for string formatting
+- Organize imports alphabetically within their groups
+
+## Flask Application Guidelines
+- Use application factory pattern for creating Flask app
+- Use Blueprint for organizing routes
+- Use a config file for environment-specific settings
+- Add error handlers for all common HTTP error codes
+- Implement proper logging for all routes and operations
+- Use Flask's built-in security features
+- Add appropriate HTTP status codes to all API responses
+- Validate all user inputs using appropriate methods
+- Implement rate limiting for API endpoints
+- Use Flask-SQLAlchemy for database operations
+
+## Database Operations
+- Use parameterized queries to prevent SQL injection
+- Implement proper database connection pooling
+- Add appropriate indexes for frequently queried columns
+- Use transactions for operations that modify multiple tables
+- Add error handling around database operations
+- Implement retry logic for database operations
+- Use migration tools for database schema changes
+- Add appropriate foreign key constraints
+- Implement proper database connection cleanup
+
+## Asynchronous Operations
+- Use asyncio for asynchronous operations
+- Implement proper error handling in async code
+- Use semaphores to limit concurrent operations
+- Add timeout handling for external API calls
+- Use proper async context managers
+
+## Docker and Deployment
+- Use multi-stage builds for Docker images
+- Minimize Docker image size by removing unnecessary files
+- Use non-root users in Docker containers
+- Set appropriate health checks
+- Use environment variables for configuration
+- Implement proper container orchestration
+- Set resource limits for containers
+- Add proper volume mounting for persistent data
+- Use Docker Compose for local development
+- Implement appropriate network security
+
+## Monitoring and Observability
+- Add Prometheus metrics for all key operations
+- Implement proper health check endpoints
+- Add structured logging
+- Implement proper error tracking
+- Add performance monitoring
+- Set up appropriate alerting rules
+
+## Security Considerations
+- Implement proper authentication and authorization
+- Use HTTPS for all external communications
+- Store secrets in environment variables or secure storage
+- Sanitize all user inputs
+- Implement CSRF protection
+- Set appropriate Content Security Policy
+- Add rate limiting to prevent abuse
+- Implement proper error handling to avoid information leakage
+- Follow OWASP security guidelines
+
+# Specific Implementation Guidelines
+
+## Web Application
+When implementing or modifying the Flask web application:
+- Ensure all templates are properly escaped to prevent XSS
+- Implement proper session management
+- Add appropriate caching headers
+- Use Flask Blueprints to organize routes
+- Add CSRF protection to all forms
+- Implement proper error pages
+
+## Job Scraper
+When implementing or modifying the job scraper logic:
+- Add rate limiting to respect target site policies
+- Implement proper retry logic with exponential backoff
+- Add circuit breaker pattern for external API calls
+- Respect robots.txt of target sites
+- Add appropriate user agents
+- Implement proper error handling for network issues
+- Add timeout handling for scraper operations
+
+## Database Schema
+When modifying the database schema:
+- Use appropriate data types for columns
+- Add proper indexes for frequently queried columns
+- Implement soft delete pattern where appropriate
+- Use triggers for audit logging
+- Add appropriate constraints for data integrity
+
+## API Endpoints
+When implementing or modifying API endpoints:
+- Add proper documentation using docstrings or OpenAPI
+- Implement proper input validation
+- Add appropriate error responses
+- Use proper HTTP methods and status codes
+- Implement pagination for list endpoints
+- Add rate limiting
+- Implement proper authentication and authorization
+
+## Docker Configuration
+When modifying Docker configurations:
+- Use specific version tags for base images
+- Minimize the number of layers
+- Use multi-stage builds where appropriate
+- Add proper health checks
+- Set appropriate environment variables
+- Add proper volume mounting
+- Implement proper network configuration
+
+## Monitoring
+When implementing or modifying monitoring:
+- Add appropriate Prometheus metrics
+- Implement proper health check endpoints
+- Add structured logging
+- Set up appropriate dashboards in Grafana
+- Implement proper alerting rules 

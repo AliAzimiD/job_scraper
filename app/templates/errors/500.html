@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Server Error - Job Scraper{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6 text-center">
+        <div class="mt-5">
+            <h1 class="display-1 text-danger">500</h1>
+            <h2 class="mb-4">Server Error</h2>
+            <p class="lead mb-4">Something went wrong on our end. Our team has been notified and is working to fix the
+                issue.</p>
+
+            {% if error %}
+            <div class="alert alert-danger">
+                <strong>Error:</strong> {{ error }}
+            </div>
+            {% endif %}
+
+            <div class="mt-4">
+                <a href="/" class="btn btn-primary me-2">
+                    <i class="bi bi-house-door"></i> Return to Home
+                </a>
+                <button class="btn btn-outline-secondary" onclick="window.location.reload()">
+                    <i class="bi bi-arrow-clockwise"></i> Try Again
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block styles %}
+{{ super() }}
+<style>
+    .error-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+
+    .error-code {
+        font-size: 8rem;
+        font-weight: bold;
+        color: #f8f9fa;
+        text-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        background: linear-gradient(45deg, #dc3545, #fd7e14);
+        -webkit-background-clip: text;
+        background-clip: text;
+    }
+
+    .error-details {
+        color: #6c757d;
+        font-size: 1.2rem;
+    }
+
+    .error-traceback {
+        font-size: 0.8rem;
+        max-height: 300px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+    }
+
+    .error-actions {
+        margin-top: 2rem;
+    }
+</style>
+{% endblock %}

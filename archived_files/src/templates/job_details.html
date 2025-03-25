@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}Job Details: {{ job.title }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="mb-3">
+        <a href="{{ url_for('search_jobs') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-arrow-left mr-1"></i> Back to Search
+        </a>
+    </div>
+
+    <div class="card shadow">
+        <div class="card-header bg-primary text-white">
+            <h3 class="card-title mb-0">{{ job.title }}</h3>
+        </div>
+        <div class="card-body">
+            <!-- Company Info -->
+            <div class="mb-4">
+                <h4>Company Information</h4>
+                <div class="row">
+                    <div class="col-md-6">
+                        <p class="mb-1">
+                            <strong>Company:</strong>
+                            {% if job.company_name_en %}
+                                {{ job.company_name_en }}
+                            {% elif job.company_name_fa %}
+                                {{ job.company_name_fa }}
+                            {% else %}
+                                Not specified
+                            {% endif %}
+                        </p>
+                        {% if job.company_about %}
+                        <p class="mb-1"><strong>About:</strong> {{ job.company_about }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        {% if job.company_url %}
+                        <p class="mb-1">
+                            <strong>Website:</strong>
+                            <a href="{{ job.company_url }}" target="_blank">{{ job.company_url }}</a>
+                        </p>
+                        {% endif %}
+                        {% if job.company_id %}
+                        <p class="mb-1"><strong>Company ID:</strong> {{ job.company_id }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            
+            <hr>
+            
+            <!-- Job Details -->
+            <div class="mb-4">
+                <h4>Job Details</h4>
+                <div class="row">
+                    <div class="col-md-6">
+                        <p class="mb-1">
+                            <strong>Location:</strong>
+                            {% if job.locations and job.locations|length > 0 %}
+                                {{ job.locations|join(', ') if job.locations is string else job.locations[0] }}
+                            {% else %}
+                                Not specified
+                            {% endif %}
+                        </p>
+                        {% if job.work_types and job.work_types|length > 0 %}
+                        <p class="mb-1">
+                            <strong>Work Type:</strong>
+                            {{ job.work_types|join(', ') if job.work_types is string else job.work_types[0] }}
+                        </p>
+                        {% endif %}
+                        {% if job.gender %}
+                        <p class="mb-1"><strong>Gender:</strong> {{ job.gender }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        {% if job.activation_time %}
+                        <p class="mb-1">
+                            <strong>Posted:</strong>
+                            {{ job.activation_time|datetime }}
+                        </p>
+                        {% endif %}
+                        {% if job.salary %}
+                        <p class="mb-1">
+                            <strong>Salary:</strong>
+                            {% if job.normalize_salary_min and job.normalize_salary_max %}
+                                {{ job.normalize_salary_min }} - {{ job.normalize_salary_max }}
+                            {% else %}
+                                {{ job.salary }}
+                            {% endif %}
+                        </p>
+                        {% endif %}
+                        {% if job.payment_method %}
+                        <p class="mb-1"><strong>Payment Method:</strong> {{ job.payment_method }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Tags Section -->
+            {% if job.tags and job.tags|length > 0 %}
+            <div class="mb-4">
+                <h4>Tags</h4>
+                <div>
+                    {% for tag in job.tags %}
+                    <span class="badge badge-info mr-1">{{ tag }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            
+            <!-- Job Description -->
+            <div class="mb-4">
+                <h4>Description</h4>
+                <div class="job-description">
+                    {% if job.description %}
+                        {{ job.description|safe }}
+                    {% else %}
+                        <p><em>No description available for this job.</em></p>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <!-- Categories Section -->
+            {% if job.job_post_categories and job.job_post_categories|length > 0 %}
+            <div class="mb-4">
+                <h4>Categories</h4>
+                <div>
+                    {% for category in job.job_post_categories %}
+                    <span class="badge badge-secondary mr-1">{{ category }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            
+            <!-- Job Source Information -->
+            <div class="mb-4">
+                <h4>Source Information</h4>
+                <div class="row">
+                    <div class="col-md-6">
+                        {% if job.job_board_title_en %}
+                        <p class="mb-1"><strong>Job Board:</strong> {{ job.job_board_title_en }}</p>
+                        {% endif %}
+                        {% if job.batch_id %}
+                        <p class="mb-1"><strong>Batch ID:</strong> {{ job.batch_id }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        {% if job.batch_date %}
+                        <p class="mb-1"><strong>Batch Date:</strong> {{ job.batch_date|datetime }}</p>
+                        {% endif %}
+                        {% if job.id %}
+                        <p class="mb-1"><strong>Job ID:</strong> {{ job.id }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card-footer">
+            <div class="d-flex justify-content-between">
+                <a href="{{ job.url }}" class="btn btn-primary" target="_blank">
+                    <i class="fas fa-external-link-alt mr-1"></i>
+                    Apply on Original Website
+                </a>
+                <a href="{{ url_for('search_jobs') }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-search mr-1"></i>
+                    Back to Search
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 
+ 

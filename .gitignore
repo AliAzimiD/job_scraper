@@ -19,32 +19,66 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.hypothesis/
 
 # Virtual Environment
 venv/
 ENV/
+.env
 
-# Data and logs
-job_data/
-*.log
-
-# IDE specific files
+# IDE
 .idea/
 .vscode/
+*.sublime-project
+*.sublime-workspace
+.spyderproject
 *.swp
-*.swo
-
-# OS specific files
+*~
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
 
-# Environment variables
+# Project specific
+/data/
+/logs/
+/uploads/
+*.log
+*.csv
+*.json
+*.parquet
+*.xlsx
+*.db
+*.sqlite
+*.sql
+*.bak
+*.gz
+*.zip
+*.tar
+*.tar.gz
+local_settings.py
+
+# Ignore configuration files with secrets
 .env
+.flaskenv
+*.env
+secrets.yaml
+keys.yaml
 
 # Docker
 .docker/
+
+# Project data
+/volumes/
+
+# Monitoring
+/prometheus/data
+/grafana/data
+
+# Don't ignore these files even if they match patterns above
+!requirements.txt
+!data/.gitkeep
+!logs/.gitkeep
+!uploads/.gitkeep
+!init-db/*.sql
+!config/*.yaml

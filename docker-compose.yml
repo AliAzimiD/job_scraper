@@ -4,114 +4,148 @@ services:
   web:
     build:
       context: .
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/app/Dockerfile
+    image: job-scraper-web:latest
     container_name: job-scraper-web
     restart: unless-stopped
     ports:
       - "5000:5000"
-    volumes:
-      - ./:/app
-      - job_data:/app/data
     environment:
-      - FLASK_ENV=production
       - FLASK_HOST=0.0.0.0
       - FLASK_PORT=5000
-      - POSTGRES_HOST=db
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=jobsdb
-      - POSTGRES_USER=jobuser
-      - POSTGRES_PASSWORD=secure_password_change_me
-      - FLASK_SECRET_KEY=change_this_to_a_random_secret_key
-      - API_USERNAME=api_user
-      - API_PASSWORD=change_this_to_a_secure_password
+      - FLASK_DEBUG=false
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/jobsdb
+      - REDIS_HOST=redis
       - LOG_LEVEL=INFO
-      - LOG_DIR=/app/data/logs
-      - CONFIG_PATH=/app/config/app_config.yaml
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./config:/app/config
     depends_on:
-      - db
-    command: bash -c "cd /app && python -m src.web_app"
+      - postgres
+      - redis
     networks:
       - job-scraper-network
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:5000/" ]
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/health" ]
       interval: 30s
       timeout: 10s
-      retries: 5
+      retries: 3
+      start_period: 40s
 
-  db:
-    image: postgres:14-alpine
-    container_name: job-scraper-db
+  postgres:
+    image: postgres:15-alpine
+    container_name: job-scraper-postgres
     restart: unless-stopped
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=jobsdb
-      - POSTGRES_USER=jobuser
-      - POSTGRES_PASSWORD=secure_password_change_me
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
-    networks:
-      - job-scraper-network
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U jobuser -d jobsdb" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  superset:
-    build:
-      context: .
-      dockerfile: Dockerfile.superset
-    container_name: job-scraper-superset
-    restart: unless-stopped
-    depends_on:
-      - db
-      - redis
-    ports:
-      - "8088:8088"
-    environment:
-      - SUPERSET_SECRET_KEY=change_this_superset_secret_key
-      - ADMIN_PASSWORD=admin
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DATABASE_URI=postgresql://jobuser:secure_password_change_me@db:5432/jobsdb
-      - SUPERSET_DB_URI=postgresql://jobuser:secure_password_change_me@db:5432/superset
-      - REDIS_URL=redis://redis:6379/0
-      - CREATE_SAMPLE_DASHBOARD=true
-      - MAPBOX_API_KEY=${MAPBOX_API_KEY:-""}
-      - PYTHONPATH=/app/pythonpath
-      - SUPERSET_ENV=production
-    volumes:
-      - superset_home:/app/superset_home
     networks:
       - job-scraper-network
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8088/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
   redis:
     image: redis:7-alpine
     container_name: job-scraper-redis
     restart: unless-stopped
+    ports:
+      - "6379:6379"
     volumes:
-      - redis_data:/data
-    networks:
-      - job-scraper-network
+      - redis-data:/data
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 5
+    command: redis-server --save 60 1 --loglevel warning
+    networks:
+      - job-scraper-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: job-scraper-prometheus
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    depends_on:
+      - web
+    networks:
+      - job-scraper-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: job-scraper-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    networks:
+      - job-scraper-network
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: job-scraper-postgres-exporter
+    ports:
+      - "9187:9187"
+    environment:
+      - DATA_SOURCE_NAME=postgresql://postgres:postgres@postgres:5432/jobsdb?sslmode=disable
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    networks:
+      - job-scraper-network
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: job-scraper-redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    restart: unless-stopped
+    depends_on:
+      - redis
+    networks:
+      - job-scraper-network
+
+volumes:
+  postgres-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+
 
 networks:
   job-scraper-network:
     driver: bridge
-
-volumes:
-  postgres_data:
-  job_data:
-  superset_home:
-  redis_data:

@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics Dashboard{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>Analytics Dashboard</h1>
+
+    {% if not superset_available %}
+    <div class="alert alert-warning" role="alert">
+        <h4 class="alert-heading">Analytics Service Not Available</h4>
+        <p>The analytics service is currently not available. Please try again later or contact the administrator.</p>
+        <hr>
+        <p class="mb-0">Make sure the Superset service is running and accessible at <code>{{ superset_url }}</code></p>
+    </div>
+
+    <div class="text-center mt-5">
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
+            <i class="fas fa-arrow-left mr-2"></i> Return to Dashboard
+        </a>
+    </div>
+    {% else %}
+
+    <div class="row mb-4">
+        <div class="col">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Advanced Analytics</h5>
+                    <p class="card-text">
+                        The analytics dashboards provide in-depth insights into job market trends, salary distributions,
+                        and other key metrics from the job scraping data.
+                    </p>
+                    <a href="{{ superset_url }}" class="btn btn-primary" target="_blank">
+                        <i class="fas fa-external-link-alt mr-2"></i> Open Superset Dashboard
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard List -->
+    <div class="row">
+        {% for dashboard in dashboards %}
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">{{ dashboard.title }}</h5>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">{{ dashboard.description }}</p>
+                    <div class="text-center">
+                        <a href="{{ dashboard.url }}" class="btn btn-outline-primary" target="_blank">
+                            View Dashboard
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="row mt-4">
+        <div class="col">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Job Market Overview</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="embed-responsive embed-responsive-16by9">
+                        <iframe class="embed-responsive-item"
+                            src="{{ superset_url }}/superset/dashboard/job-market-trends/?standalone=true"
+                            allowfullscreen></iframe>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <small class="text-muted">Embedded dashboard from Superset</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Custom SQL Analysis</h5>
+                </div>
+                <div class="card-body">
+                    <p>Use Superset's SQL Lab to run custom queries against the job database.</p>
+                    <a href="{{ superset_url }}/superset/sqllab" class="btn btn-primary" target="_blank">
+                        <i class="fas fa-database mr-2"></i> Open SQL Lab
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    // Adjust iframe height based on content (for better embedding)
+    $(document).ready(function () {
+        function adjustIframeHeight() {
+            const iframes = document.querySelectorAll('iframe');
+            const windowHeight = window.innerHeight;
+
+            iframes.forEach(iframe => {
+                iframe.style.height = (windowHeight * 0.7) + 'px';
+            });
+        }
+
+        // Initial adjustment
+        adjustIframeHeight();
+
+        // Adjust on window resize
+        window.addEventListener('resize', adjustIframeHeight);
+    });
+</script>
+{% endblock %}

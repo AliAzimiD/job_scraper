@@ -1,0 +1,3243 @@
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/Dockerfile.superset
+================================================================================
+# Dockerfile.superset
+# Extend the official Superset image
+FROM apache/superset:latest
+
+# Switch to root to install additional packages
+USER root
+
+# Install psycopg2-binary (it’s better to use psycopg2-binary for simplicity)
+RUN pip install --no-cache-dir psycopg2-binary
+
+# Reset to the default non-root user (optional, if the base image defines one)
+USER superset
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/.dockerignore
+================================================================================
+# .dockerignore
+job_data/
+.git/
+.gitignore
+.env
+*.pyc
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/docker_manage.sh
+================================================================================
+#!/bin/bash
+
+# docker_manage.sh
+case "$1" in
+    "build")
+        docker-compose build
+        ;;
+    "start")
+        docker-compose up -d
+        ;;
+    "stop")
+        docker-compose down
+        ;;
+    "logs")
+        docker-compose logs -f
+        ;;
+    "restart")
+        docker-compose restart
+        ;;
+    "clean")
+        docker-compose down -v
+        ;;
+    *)
+        echo "Usage: $0 {build|start|stop|logs|restart|clean}"
+        exit 1
+        ;;
+esac
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/Dockerfile
+================================================================================
+# Use Python 3.11-slim as a lightweight base image
+FROM python:3.11-slim
+
+# ARG to suppress tzdata interactive prompts (optional for Debian/Ubuntu-based images)
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Set working directory
+WORKDIR /app
+
+# Set environment variables for consistent behavior
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    SCRAPER_ENV=production \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app \
+    TZ=UTC
+
+# Install minimal system dependencies:
+#  - build-essential & libpq-dev required for psycopg2 compilation
+#  - cron, tzdata, logrotate needed for scheduled tasks, logs
+#  - gosu for dropping privileges
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    postgresql-client \
+    libpq-dev \
+    cron \
+    tzdata \
+    logrotate \
+    gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for running the application (security best practice)
+RUN groupadd -r scraper && useradd -r -g scraper scraper -u 1000
+
+# Create directory structure with proper permissions
+RUN mkdir -p /app/job_data/raw_data \
+    /app/job_data/processed_data \
+    /app/job_data/logs \
+    /app/config \
+    /app/health \
+    && touch /app/job_data/logs/cron.log \
+    && chown -R scraper:scraper /app \
+    && chmod -R 755 /app/job_data
+
+# Copy requirements first for Docker layer caching
+COPY --chown=scraper:scraper requirements.txt .
+
+# Install Python dependencies
+# NOTE: We install flask & psutil for the health check service; remove 'requests'
+# if not strictly needed in the main application (health check uses 'curl').
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir flask psutil
+
+# Configure log rotation for logs inside /app/job_data/logs
+RUN echo "/app/job_data/logs/*.log {\n\
+  rotate 7\n\
+  daily\n\
+  missingok\n\
+  notifempty\n\
+  compress\n\
+  delaycompress\n\
+  create 0644 scraper scraper\n\
+}" > /etc/logrotate.d/scraper \
+    && chmod 0644 /etc/logrotate.d/scraper
+
+# Set up cron jobs for scheduled scraping every 6 hours + daily logrotate
+RUN echo "0 */6 * * * cd /app && /usr/local/bin/python /app/main.py >> /app/job_data/logs/cron.log 2>&1" \
+    > /etc/cron.d/scraper-cron \
+    && echo "0 0 * * * /usr/sbin/logrotate /etc/logrotate.d/scraper --state /app/job_data/logs/logrotate.status" \
+    >> /etc/cron.d/scraper-cron \
+    && chmod 0644 /etc/cron.d/scraper-cron
+
+# Create the health check API
+# Note how we keep the entire Python script in single quotes,
+# so we can use normal double quotes for @app.route("/health").
+RUN echo 'from flask import Flask, jsonify\n\
+import psutil\n\
+import os\n\
+import time\n\
+\n\
+app = Flask(__name__)\n\
+start_time = time.time()\n\
+\n\
+@app.route("/health")\n\
+def health():\n\
+    uptime = time.time() - start_time\n\
+    log_dir = "/app/job_data/logs"\n\
+    log_files = [f for f in os.listdir(log_dir) if f.endswith(".log")]\n\
+    latest_log = None\n\
+    if log_files:\n\
+        latest_log = max([os.path.join(log_dir, f) for f in log_files], key=os.path.getmtime)\n\
+\n\
+    return jsonify({\n\
+        "status": "healthy",\n\
+        "uptime_seconds": uptime,\n\
+        "memory_usage_percent": psutil.virtual_memory().percent,\n\
+        "cpu_usage_percent": psutil.cpu_percent(interval=1),\n\
+        "disk_usage_percent": psutil.disk_usage("/").percent,\n\
+        "latest_log": latest_log,\n\
+        "environment": os.environ.get("SCRAPER_ENV", "unknown")\n\
+    })\n\
+\n\
+if __name__ == "__main__":\n\
+    app.run(host="0.0.0.0", port=8081)\n' > /app/health/app.py
+
+# Copy the entire application (including entrypoint.sh)
+COPY --chown=scraper:scraper . .
+
+# Ensure entrypoint.sh has correct permissions and line endings
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod 755 /app/entrypoint.sh
+
+# Docker HEALTHCHECK - calls the flask health endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -sf http://localhost:8081/health || exit 1
+
+# Expose the health check port
+EXPOSE 8081
+
+# Use a volume for /app/job_data to persist data and logs
+VOLUME ["/app/job_data"]
+
+# Switch to non-root user for runtime (Optional if you want to remain root for cron).
+# Currently, we keep "USER root" because cron sometimes requires root-level permissions
+# to write /var/run/crond.pid. If that's resolved, we could switch to 'USER scraper'.
+USER root
+
+# Set the entrypoint script
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/docker-compose.dev.yml
+================================================================================
+version: '3.8'
+
+services:
+  scraper:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: job_scraper_dev
+    volumes:
+      - .:/app
+      - ./job_data:/app/job_data
+    environment:
+      - SCRAPER_ENV=development
+      - PYTHONPATH=/app
+      - TZ=UTC
+    command: python main.py
+    ports:
+      - "8888:8888"  # For debugging if needed
+    restart: "no"
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/docker-compose.yml
+================================================================================
+version: '3.9'
+
+services:
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: job_scraper
+    volumes:
+      - ./job_data:/app/job_data
+      - ./config:/app/config
+    environment:
+      - SCRAPER_ENV=production
+      - TZ=Asia/Tehran
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=jobsdb
+      - POSTGRES_USER=jobuser
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+      - ENABLE_CRON=true
+      - RUN_ON_START=true
+      - LOG_LEVEL=INFO
+    secrets:
+      - db_password
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - scraper-network
+
+  db:
+    image: postgres:15-alpine
+    container_name: job_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    environment:
+      - POSTGRES_DB=jobsdb
+      - POSTGRES_USER=jobuser
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+      - POSTGRES_INITDB_ARGS="--data-checksums"
+    secrets:
+      - db_password
+    ports:
+      - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobuser -d jobsdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scraper-network
+    shm_size: 256m
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: job_pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD_FILE=/run/secrets/pgadmin_password
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    secrets:
+      - pgadmin_password
+    ports:
+      - "5050:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - scraper-network
+    healthcheck:
+      test: ["CMD", "wget", "-O", "-", "http://localhost/misc/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  superset:
+    build:
+      context: .
+      dockerfile: Dockerfile.superset
+    container_name: job_superset
+    depends_on:
+      db:
+        condition: service_healthy
+    secrets:
+      - db_password
+    environment:
+      SUPERSET_SECRET_KEY: "change_this_to_something_random"
+    ports:
+      - "8088:8088"
+    volumes:
+      - superset_home:/app/superset_home
+    command: >
+      /bin/bash -c '
+        DB_PASS=$(cat /run/secrets/db_password) &&
+        export SQLALCHEMY_DATABASE_URI="postgresql+psycopg2://jobuser:$DB_PASS@db:5432/jobsdb" &&
+        superset fab create-admin --username admin --password admin --firstname Admin --lastname User --email admin@example.com &&
+        superset db upgrade &&
+        superset init &&
+        superset run -p 8088 -h 0.0.0.0 --with-threads --reload --debugger
+      '
+    restart: unless-stopped
+    networks:
+      - scraper-network
+
+volumes:
+  postgres_data:
+    name: job_postgres_data
+  pgadmin_data:
+    name: job_pgadmin_data
+  superset_home:
+    name: job_superset_home
+
+networks:
+  scraper-network:
+    driver: bridge
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  pgadmin_password:
+    file: ./secrets/pgadmin_password.txt
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/.gitignore
+================================================================================
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+
+# Data and logs
+job_data/
+*.log
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment variables
+.env
+
+# Docker
+.docker/
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/Makefile
+================================================================================
+# Makefile
+
+.PHONY: build start stop logs restart clean dev
+
+build:
+	docker-compose build
+
+start:
+	docker-compose up -d
+
+stop:
+	docker-compose down
+
+logs:
+	docker-compose logs -f
+
+restart:
+	docker-compose restart
+
+clean:
+	docker-compose down -v
+	sudo rm -rf job_data/*
+
+dev:
+	docker-compose -f docker-compose.dev.yml up --build
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/entrypoint.sh
+================================================================================
+#!/bin/bash
+# entrypoint.sh
+# This script sets up the container environment, starts auxiliary services (health check and cron),
+# and finally launches the scraper application with proper signal handling and privilege dropping.
+
+# Exit immediately if a command exits with a non-zero status.
+set -e
+
+##############################
+# Function Definitions
+##############################
+
+# Log a message with a timestamp.
+log() {
+    echo "$(date +"%Y-%m-%d %H:%M:%S") - $1"
+}
+
+# Cleanup function to gracefully shut down services on SIGTERM/SIGINT.
+cleanup() {
+    log "Received shutdown signal. Initiating cleanup..."
+    if [ -n "$HEALTH_PID" ]; then
+        log "Stopping health check service (PID=$HEALTH_PID)..."
+        kill -TERM "$HEALTH_PID" 2>/dev/null || true
+    fi
+    if [ "$ENABLE_CRON" = "true" ]; then
+        log "Stopping cron service..."
+        service cron stop || true
+    fi
+    log "Cleanup complete. Exiting."
+    exit 0
+}
+
+# Setup the log directory and fix permissions.
+setup_logs() {
+    log "Creating log directory and setting permissions..."
+    mkdir -p /app/job_data/logs
+    chmod -R 755 /app/job_data
+    # Ensure ownership for logs is correct.
+    chown -R scraper:scraper /app/job_data
+    find /app/job_data/logs -type f -name "*.log" -exec chown scraper:scraper {} \;
+    find /app/job_data/logs -type f -name "*.log" -exec chmod 644 {} \;
+
+    # Ensure cron.log exists with proper permissions.
+    touch /app/job_data/logs/cron.log
+    chown scraper:scraper /app/job_data/logs/cron.log
+    chmod 644 /app/job_data/logs/cron.log
+}
+
+# Start the health check service in the background.
+start_health() {
+    log "Starting health check Flask service on port 8081..."
+    # Start the health service in the background.
+    python /app/health/app.py &
+    HEALTH_PID=$!
+    log "Health check service started with PID=$HEALTH_PID"
+
+    # Wait until the health service responds.
+    for i in {1..10}; do
+        if curl -s http://localhost:8081/health > /dev/null; then
+            log "Health service is up and running!"
+            return 0
+        fi
+        if [ "$i" -eq 10 ]; then
+            log "ERROR: Health service failed to start after 10 attempts!"
+            exit 1
+        fi
+        log "Health service not ready yet... ($i/10)"
+        sleep 1
+    done
+}
+
+# Start cron service (runs as root) if enabled.
+start_cron() {
+    if [ "$ENABLE_CRON" = "true" ]; then
+        log "Starting cron service..."
+        # Start cron as root so that /var/run/crond.pid can be written.
+        service cron start || { log "Failed to start cron service"; exit 1; }
+        log "Cron service started successfully."
+
+        # Verify that cron is running.
+        if ! service cron status > /dev/null; then
+            log "ERROR: Cron service is not running!"
+            exit 1
+        fi
+        log "Cron service verified as running."
+    fi
+}
+
+# Run the scraper job.
+run_scraper_job() {
+    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+    LOG_FILE="/app/job_data/logs/scraper_${TIMESTAMP}.log"
+    touch "$LOG_FILE"
+    chown scraper:scraper "$LOG_FILE"
+
+    log "Running initial scraper job; logging output to $LOG_FILE"
+
+    # Use gosu to drop privileges to the 'scraper' user.
+    if ! gosu scraper bash -c "cd /app && python /app/main.py > $LOG_FILE 2>&1"; then
+        log "ERROR: Initial scraper job failed. Showing last 20 lines of log:"
+        tail -n 20 "$LOG_FILE" || echo "No log file found at $LOG_FILE"
+        exit 1
+    fi
+
+    log "Initial scraper job completed successfully."
+}
+
+##############################
+# Main Script Execution
+##############################
+
+# Set up trap to catch SIGTERM and SIGINT signals.
+trap cleanup SIGTERM SIGINT
+
+# Validate required environment variables.
+if [ -z "$SCRAPER_ENV" ]; then
+    log "ERROR: SCRAPER_ENV environment variable is not set!"
+    exit 1
+fi
+
+log "Starting job scraper in $SCRAPER_ENV environment..."
+
+# Setup logs directory and permissions.
+setup_logs
+
+# Start the health check service.
+start_health
+
+# Optionally start the cron service.
+start_cron
+
+# If RUN_ON_START is true, run the scraper immediately.
+if [ "$RUN_ON_START" = "true" ]; then
+    run_scraper_job
+fi
+
+# If cron is enabled, keep the container running.
+if [ "$ENABLE_CRON" = "true" ]; then
+    log "Container will remain running to support cron jobs."
+    exec tail -f /app/job_data/logs/cron.log
+else
+    log "ENABLE_CRON is false; container will exit after scraper job completes."
+    exit 0
+fi
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/main.py
+================================================================================
+import asyncio
+import logging
+import os
+import signal
+import sys
+import time
+import yaml
+from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict
+
+from src.scraper import JobScraper
+from src.health import HealthCheck
+from src.db_manager import DatabaseManager
+from src.log_setup import get_logger  # Centralized logger
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # For imports
+
+
+class GracefulExit:
+    """
+    Handles graceful shutdown for the application by capturing
+    SIGINT and SIGTERM signals, then running registered async tasks.
+    """
+    def __init__(self) -> None:
+        self.shutdown: bool = False
+        self.shutdown_tasks: list[Any] = []
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+
+    def register_shutdown_task(self, task: Any) -> None:
+        """
+        Register a coroutine to be executed during shutdown.
+
+        Args:
+            task (Any): An async function or coroutine to run on exit.
+        """
+        self.shutdown_tasks.append(task)
+
+    async def execute_shutdown(self) -> None:
+        """
+        Execute all registered shutdown tasks in sequence.
+        """
+        if self.shutdown_tasks:
+            logging.info(f"Executing {len(self.shutdown_tasks)} shutdown tasks...")
+            for task in self.shutdown_tasks:
+                try:
+                    await task()
+                except Exception as e:
+                    logging.error(f"Error during shutdown task: {str(e)}")
+
+    def _signal_handler(self, signum, frame) -> None:
+        """
+        Internal handler that sets shutdown flag on SIGINT or SIGTERM.
+        """
+        print("\nShutdown signal received. Cleaning up...")
+        self.shutdown = True
+
+
+@asynccontextmanager
+async def lifespan():
+    """
+    Context manager for the app's lifespan. Sets up the DB, health server,
+    and ensures graceful teardown if a shutdown signal is received.
+
+    Yields:
+        dict: Contains references to graceful_exit, logger, db_manager, config
+    """
+    logger = get_logger(name="main")
+    graceful_exit = GracefulExit()
+    config = load_config()
+
+    db_manager: DatabaseManager = None  # type: ignore
+    health_runner = None
+    health_site = None
+
+    try:
+        # Initialize DB connection from config
+        connection_str = config["database"]["connection_string"]
+        db_manager = DatabaseManager(connection_string=connection_str)
+        db_success = await db_manager.initialize()
+        if not db_success:
+            logger.error("Failed to initialize database connection")
+            raise RuntimeError("Database initialization failed")
+
+        # Optionally start health server if config says so
+        if config["app"].get("enable_health_check", True):
+            health_check = HealthCheck(db_manager)
+            host = config["app"].get("health_host", "0.0.0.0")
+            port = config["app"].get("health_port", 8082)
+            health_runner, health_site = await health_check.start(host=host, port=port)
+            logger.info(f"Health check server started on port {port}")
+
+        # On shutdown, close DB + health server
+        if db_manager:
+            graceful_exit.register_shutdown_task(lambda: db_manager.close())
+        if health_runner:
+            graceful_exit.register_shutdown_task(lambda: health_runner.cleanup())
+
+        # Provide resources to the caller (e.g. run_scraper)
+        yield {
+            "graceful_exit": graceful_exit,
+            "logger": logger,
+            "db_manager": db_manager,
+            "config": config
+        }
+
+    except Exception as e:
+        logger.error(f"Error during startup: {str(e)}")
+        # Cleanup if partial setup occurred
+        if db_manager:
+            await db_manager.close()
+        if health_runner:
+            await health_runner.cleanup()
+        raise
+    finally:
+        if graceful_exit.shutdown:
+            await graceful_exit.execute_shutdown()
+            logger.info("Graceful shutdown completed")
+
+
+def load_config() -> Dict[str, Any]:
+    """
+    Load config from a YAML file plus environment overrides,
+    merging them into a final dictionary.
+
+    Returns:
+        dict: Final config with 'app', 'database', 'scraper' keys
+    """
+    config: Dict[str, Any] = {
+        "app": {
+            "environment": "development",
+            "enable_health_check": True,
+            "health_port": 8080,
+            "log_level": "INFO",
+        },
+        "database": {
+            "connection_string": "postgresql://postgres:postgres@localhost:5432/jobsdb",
+            "schema": "public",
+            "pool_size": 10,
+        },
+        "scraper": {
+            "config_path": "config/api_config.yaml",
+            "save_dir": "job_data",
+            "batch_size": 100,
+            "max_retries": 3,
+            "retry_delay": 5,
+        },
+    }
+
+    # Attempt to load from a local config file if it exists
+    config_path = os.getenv("CONFIG_PATH", "config/app_config.yaml")
+    if os.path.exists(config_path):
+        try:
+            import yaml
+            with open(config_path, "r", encoding="utf-8") as f:
+                file_config = yaml.safe_load(f)
+                for section in config:
+                    if section in file_config:
+                        config[section].update(file_config[section])
+        except Exception as e:
+            logging.warning(f"Error loading config file: {str(e)}")
+
+    # Merge environment variables for DB / app / scraper
+    if os.getenv("POSTGRES_HOST"):
+        db_user = os.getenv("POSTGRES_USER", "postgres")
+        db_password = os.getenv("POSTGRES_PASSWORD", "")
+        db_host = os.getenv("POSTGRES_HOST", "localhost")
+        db_port = os.getenv("POSTGRES_PORT", "5432")
+        db_name = os.getenv("POSTGRES_DB", "jobsdb")
+
+        # If password is in a file, read it
+        pw_file = os.getenv("POSTGRES_PASSWORD_FILE")
+        if pw_file and os.path.exists(pw_file):
+            with open(pw_file, "r", encoding="utf-8") as pf:
+                db_password = pf.read().strip()
+
+        config["database"]["connection_string"] = (
+            f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+        )
+
+    # Overwrite app config if present
+    if os.getenv("SCRAPER_ENV"):
+        config["app"]["environment"] = os.getenv("SCRAPER_ENV")
+
+    if os.getenv("LOG_LEVEL"):
+        config["app"]["log_level"] = os.getenv("LOG_LEVEL")
+
+    if os.getenv("ENABLE_HEALTH_CHECK"):
+        config["app"]["enable_health_check"] = os.getenv("ENABLE_HEALTH_CHECK").lower() == "true"
+
+    if os.getenv("HEALTH_PORT"):
+        config["app"]["health_port"] = int(os.getenv("HEALTH_PORT"))
+
+    # Overwrite scraper config if present
+    if os.getenv("SCRAPER_CONFIG_PATH"):
+        config["scraper"]["config_path"] = os.getenv("SCRAPER_CONFIG_PATH")
+
+    if os.getenv("SAVE_DIR"):
+        config["scraper"]["save_dir"] = os.getenv("SAVE_DIR")
+
+    return config
+
+
+async def run_scraper(resources: Dict[str, Any]) -> bool:
+    """
+    Run the job scraper with error handling, DB stats collection, and final logging.
+
+    Args:
+        resources (dict): Contains logger, db_manager, config, graceful_exit
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    logger: logging.Logger = resources["logger"]
+    db_manager: DatabaseManager = resources["db_manager"]
+    config: Dict[str, Any] = resources["config"]
+    graceful_exit: GracefulExit = resources["graceful_exit"]
+
+    start_time = time.time()
+    stats = {
+        "total_jobs_scraped": 0,
+        "new_jobs_found": 0,
+        "pages_processed": 0,
+        "errors": 0,
+        "status": "running",
+        "metadata": {},
+    }
+
+    try:
+        # Create the scraper with the DB manager
+        from src.scraper import JobScraper
+        scraper = JobScraper(
+            config_path=config["scraper"]["config_path"],
+            save_dir=config["scraper"]["save_dir"],
+            db_manager=db_manager,
+        )
+
+        init_success = await scraper.initialize()
+        if not init_success:
+            logger.error("Failed to initialize scraper. Exiting.")
+            stats["status"] = "failed"
+            stats["metadata"]["failure_reason"] = "initialization_failed"
+            await db_manager.record_scraper_stats(stats)
+            return False
+
+        try:
+            # Actually scrape
+            result = await scraper.run()
+            stats.update({
+                "total_jobs_scraped": result.get("total_jobs", 0),
+                "pages_processed": result.get("pages_processed", 0),
+                # If you track new_jobs separately, include here
+                "status": "completed"
+            })
+            logger.info(
+                f"Scraper run completed. Processed {stats['pages_processed']} pages, "
+                f"total {stats['total_jobs_scraped']} jobs."
+            )
+
+        except Exception as e:
+            # If a fatal error occurs mid-scrape
+            if graceful_exit.shutdown:
+                logger.info("Scraper interrupted by shutdown signal.")
+                stats["status"] = "interrupted"
+            else:
+                logger.error(f"Error during scraping: {str(e)}")
+                stats["status"] = "failed"
+                stats["errors"] += 1
+                stats["metadata"]["error"] = str(e)
+
+    except Exception as e:
+        logger.error(f"Critical error in run_scraper: {str(e)}")
+        stats["status"] = "failed"
+        stats["errors"] += 1
+        stats["metadata"]["critical_error"] = str(e)
+        return False
+    finally:
+        # Record total run time and store in DB
+        stats["processing_time"] = time.time() - start_time
+        try:
+            await db_manager.record_scraper_stats(stats)
+        except Exception as e:
+            logger.error(f"Failed to record scraper stats: {str(e)}")
+
+        logger.info(
+            f"Scraper run {stats['status']} in {stats['processing_time']:.2f} seconds"
+        )
+
+    return stats["status"] == "completed"
+
+
+async def main() -> int:
+    """
+    Main async entry point. Uses lifespan context manager to handle resources.
+    """
+    try:
+        async with lifespan() as resources:
+            success = await run_scraper(resources)
+            return 0 if success else 1
+    except Exception as e:
+        print(f"Fatal error in main(): {str(e)}")
+        return 1
+
+
+if __name__ == "__main__":
+    try:
+        exit_code = asyncio.run(main())
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        print("\nScript terminated by user")
+        sys.exit(130)
+    except Exception as e:
+        print(f"Fatal error: {str(e)}")
+        sys.exit(1)
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/requirements.txt
+================================================================================
+# Core dependencies
+aiohttp==3.9.3
+pandas==2.2.0
+pyyaml==6.0.1
+tenacity==8.2.3
+pyarrow==15.0.0  # for parquet support
+
+# Database dependencies
+psycopg2-binary==2.9.9  # PostgreSQL adapter
+sqlalchemy==2.0.27  # SQL toolkit and ORM
+asyncpg==0.29.0  # Async PostgreSQL driver
+alembic==1.13.1  # Database migrations
+
+# Monitoring and health check
+psutil==5.9.8  # System monitoring
+prometheus-client==0.19.0  # Metrics collection
+aiohttp-metrics # Metrics for aiohttp
+
+# Utilities
+python-dotenv==1.0.1  # Environment variable management
+pydantic==2.6.1  # Data validation
+ujson==5.9.0  # Fast JSON parsing
+aiologger==0.7.0  # Async logging
+backoff==2.2.1  # Exponential backoff
+cachetools==5.3.2  # Caching utilities
+
+# Development dependencies (optional)
+pytest==7.4.4
+pytest-asyncio==0.23.4
+pytest-cov==4.1.0
+black==23.12.1
+isort==5.13.2
+mypy==1.7.1
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/README.md
+================================================================================
+# Job Scraper
+
+## Overview
+A Python 3.11+ asynchronous application that scrapes job postings from remote APIs and stores them in a PostgreSQL database or local files (JSON, CSV, Parquet). Deployable via Docker for robust scheduling (cron-based) and containerized observability.
+
+## Directory Structure
+
+job_scraper/ ├── Dockerfile ├── docker-compose.yml ├── main.py ├── src/ │ ├── log_setup.py <-- Central logging config │ ├── scraper.py │ ├── scheduler.py │ ├── db_manager.py │ ├── config_manager.py │ ├── health.py ├── tests/ │ ├── test_db_manager.py │ └── test_scraper.py └── ...
+
+perl
+Copy
+Edit
+
+## Major Components
+1. **`main.py`**  
+   - Sets up resources, runs the scraper, logs results, triggers graceful shutdown.
+2. **`scraper.py`**: `JobScraper`  
+   - Fetches paginated data from configured API, handles retries, saves results.
+3. **`db_manager.py`**: `DatabaseManager`  
+   - Manages async DB access (bulk upsert with temp tables), plus stats & batch tracking.
+4. **`config_manager.py`**: `ConfigManager`  
+   - Loads YAML config, merges environment overrides, saves “scraper_state.json”.
+5. **`health.py`**: `HealthCheck`  
+   - Exposes `aiohttp`-based endpoints for health and metrics checks.
+6. **`log_setup.py`** (newly added)  
+   - Centralized logging logic to be imported by other modules.
+7. **`scheduler.py`**: `JobScraperScheduler`  
+   - Repeated scheduled runs of the scraper in a loop.
+
+## Setup & Installation
+
+### Docker Deployment
+1. `make build`  
+2. `make start`  
+
+The scraper container runs automatically, uses a cron job to schedule repeated scraping, and logs to `job_data/logs/`.
+
+### Local Development
+1. `python -m venv venv && source venv/bin/activate`
+2. `pip install -r requirements.txt`
+3. `python main.py`
+
+## Testing
+Tests are in `tests/`; run with:
+```bash
+pytest --asyncio-mode=auto --cov=src --cov-report=html
+Configuration
+config/api_config.yaml: Main scraping + DB parameters
+Environment variables override YAML settings:
+SCRAPER_ENV, POSTGRES_HOST, LOG_LEVEL, etc.
+CI/CD
+Minimal example in .github/workflows/ci.yml sets up mypy checks, lint, bandit, tests, code coverage.
+Monitoring
+health.py listens on /health and /metrics.
+Integration with Prometheus or other monitoring solutions is possible by adding Prometheus exporters.
+Security & Secrets
+Uses Docker secrets (db_password_file) for DB.
+For advanced production, adopt AWS Secrets Manager, Vault, or other secure secret retrieval.
+License
+[Specify your license here, e.g. MIT]
+
+importatnt queries:
+Add New Columns for Tags (One-Hot Encoding)
+sql
+Copy
+-- Step 1: Add new columns to store binary values
+ALTER TABLE jobs_table 
+ADD COLUMN tag_no_experience INT DEFAULT 0,
+ADD COLUMN tag_remote INT DEFAULT 0,
+ADD COLUMN tag_part_time INT DEFAULT 0,
+ADD COLUMN tag_internship INT DEFAULT 0,
+ADD COLUMN tag_military_exemption INT DEFAULT 0;
+
+-- Step 2: Update the new columns based on JSONB tags array
+UPDATE jobs_table
+SET 
+    tag_no_experience = CASE WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(tags) AS tag WHERE tag = 'بدون نیاز به سابقه'
+    ) THEN 1 ELSE 0 END,
+
+    tag_remote = CASE WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(tags) AS tag WHERE tag = 'دورکاری'
+    ) THEN 1 ELSE 0 END,
+
+    tag_part_time = CASE WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(tags) AS tag WHERE tag = 'پاره وقت'
+    ) THEN 1 ELSE 0 END,
+
+    tag_internship = CASE WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(tags) AS tag WHERE tag = 'کارآموزی'
+    ) THEN 1 ELSE 0 END,
+
+    tag_military_exemption = CASE WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(tags) AS tag WHERE tag = 'امریه سربازی'
+    ) THEN 1 ELSE 0 END;
+2️⃣ Add & Populate "jobBoard titleEn" and "jobBoard titleFa"
+sql
+Copy
+-- Step 1: Add new columns
+ALTER TABLE jobs_table 
+ADD COLUMN jobBoard_titleEn TEXT,
+ADD COLUMN jobBoard_titleFa TEXT;
+
+-- Step 2: Update the new columns by extracting values from the "raw_data" JSONB column
+UPDATE jobs_table
+SET 
+    jobBoard_titleEn = raw_data->'jobBoard'->>'titleEn',
+    jobBoard_titleFa = raw_data->'jobBoard'->>'titleFa'
+WHERE raw_data ? 'jobBoard';
+
+
+-- Alter the table to add new columns
+ALTER TABLE jobs
+ADD COLUMN primary_city text,
+ADD COLUMN work_type text,
+ADD COLUMN category text,
+ADD COLUMN sub_cat text,
+ADD COLUMN parent_cat text;
+
+-- Update primary_city by extracting the first element's "city"->"titleEn" from locations JSON array
+UPDATE jobs
+SET primary_city = (
+    SELECT elem->'city'->>'titleEn'
+    FROM jsonb_array_elements(locations::jsonb) AS elem
+    LIMIT 1
+)
+WHERE locations IS NOT NULL
+  AND jsonb_typeof(locations::jsonb) = 'array';
+
+-- Update work_type by extracting the first element's "titleEn" from work_types JSON array
+UPDATE jobs
+SET work_type = (
+    SELECT elem->>'titleEn'
+    FROM jsonb_array_elements(work_types::jsonb) AS elem
+    LIMIT 1
+)
+WHERE work_types IS NOT NULL
+  AND jsonb_typeof(work_types::jsonb) = 'array';
+
+-- Update category, parent_cat, and sub_cat from job_post_categories JSON array.
+-- Only update rows where job_post_categories is a valid JSON array.
+UPDATE jobs
+SET 
+  category = CASE 
+    WHEN jsonb_array_length(job_post_categories::jsonb) >= 2 
+      THEN job_post_categories::jsonb -> 1 ->> 'titleEn'
+    WHEN jsonb_array_length(job_post_categories::jsonb) = 1 
+      THEN job_post_categories::jsonb -> 0 ->> 'titleEn'
+    ELSE NULL
+  END,
+  parent_cat = CASE 
+    WHEN jsonb_array_length(job_post_categories::jsonb) >= 2 
+      THEN job_post_categories::jsonb -> 0 ->> 'titleEn'
+    ELSE NULL
+  END,
+  sub_cat = CASE 
+    WHEN jsonb_array_length(job_post_categories::jsonb) >= 2 
+      THEN job_post_categories::jsonb -> 1 ->> 'titleEn'
+    ELSE NULL
+  END
+WHERE job_post_categories IS NOT NULL
+  AND jsonb_typeof(job_post_categories::jsonb) = 'array';
+
+
+
+-------------------------------------
+-- Step 1: Add new columns to store binary values (avoid error if they exist)
+ALTER TABLE jobs
+ADD COLUMN IF NOT EXISTS tag_no_experience INT DEFAULT 0,
+ADD COLUMN IF NOT EXISTS tag_remote INT DEFAULT 0,
+ADD COLUMN IF NOT EXISTS tag_part_time INT DEFAULT 0,
+ADD COLUMN IF NOT EXISTS tag_internship INT DEFAULT 0,
+ADD COLUMN IF NOT EXISTS tag_military_exemption INT DEFAULT 0;
+
+-- Step 2: Update the new columns based on JSONB tags array
+UPDATE jobs
+SET 
+    tag_no_experience = CASE WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(tags) AS tag WHERE tag = 'بدون نیاز به سابقه'
+    ) THEN 1 ELSE 0 END,
+
+    tag_remote = CASE WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(tags) AS tag WHERE tag = 'دورکاری'
+    ) THEN 1 ELSE 0 END,
+
+    tag_part_time = CASE WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(tags) AS tag WHERE tag = 'پاره وقت'
+    ) THEN 1 ELSE 0 END,
+
+    tag_internship = CASE WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(tags) AS tag WHERE tag = 'کارآموزی'
+    ) THEN 1 ELSE 0 END,
+
+    tag_military_exemption = CASE WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(tags) AS tag WHERE tag = 'امریه سربازی'
+    ) THEN 1 ELSE 0 END;
+
+-- Step 3: Add columns for job board title (avoid error if they exist)
+ALTER TABLE jobs
+ADD COLUMN IF NOT EXISTS jobBoard_titleEn TEXT,
+ADD COLUMN IF NOT EXISTS jobBoard_titleFa TEXT;
+
+-- Step 4: Update job board title columns based on JSONB data
+UPDATE jobs
+SET 
+    jobBoard_titleEn = raw_data->'jobBoard'->>'titleEn',
+    jobBoard_titleFa = raw_data->'jobBoard'->>'titleFa'
+WHERE raw_data ? 'jobBoard';
+
+-- Step 5: Add columns for location, work type, and categories (avoid error if they exist)
+ALTER TABLE jobs
+ADD COLUMN IF NOT EXISTS primary_city TEXT,
+ADD COLUMN IF NOT EXISTS work_type TEXT,
+ADD COLUMN IF NOT EXISTS category TEXT,
+ADD COLUMN IF NOT EXISTS sub_cat TEXT,
+ADD COLUMN IF NOT EXISTS parent_cat TEXT;
+
+-- Step 6: Update primary_city by extracting "city"->"titleEn" from locations JSON array
+UPDATE jobs
+SET primary_city = (
+    SELECT elem->'city'->>'titleEn'
+    FROM jsonb_array_elements(locations::jsonb) AS elem
+    LIMIT 1
+)
+WHERE locations IS NOT NULL
+  AND jsonb_typeof(locations::jsonb) = 'array';
+
+-- Step 7: Update work_type by extracting "titleEn" from work_types JSON array
+UPDATE jobs
+SET work_type = (
+    SELECT elem->>'titleEn'
+    FROM jsonb_array_elements(work_types::jsonb) AS elem
+    LIMIT 1
+)
+WHERE work_types IS NOT NULL
+  AND jsonb_typeof(work_types::jsonb) = 'array';
+
+-- Step 8: Update category, parent_cat, and sub_cat from job_post_categories JSON array.
+UPDATE jobs
+SET 
+  category = CASE 
+    WHEN jsonb_array_length(job_post_categories::jsonb) >= 2 
+      THEN job_post_categories::jsonb -> 1 ->> 'titleEn'
+    WHEN jsonb_array_length(job_post_categories::jsonb) = 1 
+      THEN job_post_categories::jsonb -> 0 ->> 'titleEn'
+    ELSE NULL
+  END,
+  parent_cat = CASE 
+    WHEN jsonb_array_length(job_post_categories::jsonb) >= 2 
+      THEN job_post_categories::jsonb -> 0 ->> 'titleEn'
+    ELSE NULL
+  END,
+  sub_cat = CASE 
+    WHEN jsonb_array_length(job_post_categories::jsonb) >= 2 
+      THEN job_post_categories::jsonb -> 1 ->> 'titleEn'
+    ELSE NULL
+  END
+WHERE job_post_categories IS NOT NULL
+  AND jsonb_typeof(job_post_categories::jsonb) = 'array';
+-------------------------------------------------------------
+
+In PostgreSQL, you have essentially two main ways to ensure that these derived columns are always populated for new or updated rows:
+
+1. **Use a Trigger** (most common approach)
+2. Use a **Generated Column** (with limitations, especially when referencing JSON data).
+
+Below is the recommended approach using a **trigger**. The high-level idea is:
+
+- Create the columns (if they do not exist).
+- Write a PL/pgSQL function that calculates/populates those columns from the JSON fields.
+- Attach that function to the table via a `BEFORE INSERT OR UPDATE` trigger so that every new or updated row automatically gets these fields populated.
+
+---
+
+## 1) Create the columns (if they do not already exist)
+
+```sql
+ALTER TABLE jobs
+  ADD COLUMN IF NOT EXISTS tag_no_experience INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS tag_remote INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS tag_part_time INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS tag_internship INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS tag_military_exemption INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS jobBoard_titleEn TEXT,
+  ADD COLUMN IF NOT EXISTS jobBoard_titleFa TEXT,
+  ADD COLUMN IF NOT EXISTS primary_city TEXT,
+  ADD COLUMN IF NOT EXISTS work_type TEXT,
+  ADD COLUMN IF NOT EXISTS category TEXT,
+  ADD COLUMN IF NOT EXISTS parent_cat TEXT,
+  ADD COLUMN IF NOT EXISTS sub_cat TEXT;
+```
+
+> **Note**: If some of these columns already exist or you already added them, you can skip the columns already in place.
+
+---
+
+## 2) Create a PL/pgSQL Function to Populate the Columns
+
+This function will apply the same logic that you were using in your manual `UPDATE` statements but will do so whenever a row is inserted or updated.
+
+```sql
+CREATE OR REPLACE FUNCTION fn_update_derived_columns()
+RETURNS TRIGGER AS
+$$
+BEGIN
+    -------------------------------------------------------------------
+    -- Tags logic
+    -------------------------------------------------------------------
+    IF NEW.tags IS NOT NULL THEN
+
+        -- tag_no_experience
+        NEW.tag_no_experience := CASE 
+            WHEN EXISTS (SELECT 1 
+                         FROM jsonb_array_elements_text(NEW.tags) AS t
+                         WHERE t = 'بدون نیاز به سابقه')
+            THEN 1
+            ELSE 0
+        END;
+        
+        -- tag_remote
+        NEW.tag_remote := CASE 
+            WHEN EXISTS (SELECT 1 
+                         FROM jsonb_array_elements_text(NEW.tags) AS t
+                         WHERE t = 'دورکاری')
+            THEN 1
+            ELSE 0
+        END;
+
+        -- tag_part_time
+        NEW.tag_part_time := CASE 
+            WHEN EXISTS (SELECT 1 
+                         FROM jsonb_array_elements_text(NEW.tags) AS t
+                         WHERE t = 'پاره وقت')
+            THEN 1
+            ELSE 0
+        END;
+
+        -- tag_internship
+        NEW.tag_internship := CASE 
+            WHEN EXISTS (SELECT 1 
+                         FROM jsonb_array_elements_text(NEW.tags) AS t
+                         WHERE t = 'کارآموزی')
+            THEN 1
+            ELSE 0
+        END;
+
+        -- tag_military_exemption
+        NEW.tag_military_exemption := CASE 
+            WHEN EXISTS (SELECT 1 
+                         FROM jsonb_array_elements_text(NEW.tags) AS t
+                         WHERE t = 'امریه سربازی')
+            THEN 1
+            ELSE 0
+        END;
+
+    END IF;
+
+    -------------------------------------------------------------------
+    -- jobBoard_titleEn & jobBoard_titleFa logic
+    -------------------------------------------------------------------
+    IF NEW.raw_data ? 'jobBoard' THEN
+        NEW.jobBoard_titleEn := NEW.raw_data->'jobBoard'->>'titleEn';
+        NEW.jobBoard_titleFa := NEW.raw_data->'jobBoard'->>'titleFa';
+    END IF;
+
+    -------------------------------------------------------------------
+    -- primary_city (from locations)
+    -------------------------------------------------------------------
+    IF NEW.locations IS NOT NULL
+       AND jsonb_typeof(NEW.locations) = 'array' THEN
+        NEW.primary_city := (
+            SELECT elem->'city'->>'titleEn'
+            FROM jsonb_array_elements(NEW.locations) AS elem
+            LIMIT 1
+        );
+    END IF;
+
+    -------------------------------------------------------------------
+    -- work_type (from work_types)
+    -------------------------------------------------------------------
+    IF NEW.work_types IS NOT NULL
+       AND jsonb_typeof(NEW.work_types) = 'array' THEN
+        NEW.work_type := (
+            SELECT elem->>'titleEn'
+            FROM jsonb_array_elements(NEW.work_types) AS elem
+            LIMIT 1
+        );
+    END IF;
+
+    -------------------------------------------------------------------
+    -- category, parent_cat, sub_cat (from job_post_categories)
+    -------------------------------------------------------------------
+    IF NEW.job_post_categories IS NOT NULL
+       AND jsonb_typeof(NEW.job_post_categories) = 'array'
+       AND jsonb_array_length(NEW.job_post_categories) > 0 THEN
+
+        -- If there's only one element in the array, that becomes "category"
+        -- If there are at least two, the first is "parent_cat" and the second is "sub_cat" (and also "category").
+        IF jsonb_array_length(NEW.job_post_categories) = 1 THEN
+            NEW.category := NEW.job_post_categories->0->>'titleEn';
+            NEW.parent_cat := NULL; -- or same as category if you prefer
+            NEW.sub_cat := NULL;
+        ELSIF jsonb_array_length(NEW.job_post_categories) >= 2 THEN
+            NEW.category := NEW.job_post_categories->1->>'titleEn';
+            NEW.parent_cat := NEW.job_post_categories->0->>'titleEn';
+            NEW.sub_cat := NEW.job_post_categories->1->>'titleEn';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql;
+```
+
+A few notes on the function:
+
+- We used `NEW` rather than the table name since this is a **trigger function**. `NEW` represents the row being inserted or updated.
+- We check for `NULL` or array conditions to avoid errors when those JSON fields don’t exist or are invalid.
+
+---
+
+## 3) Create a Trigger that Calls This Function
+
+We want this to happen **before** each row is actually inserted or updated, so the final row inserted/updated has the correct derived columns.
+
+```sql
+DROP TRIGGER IF EXISTS trg_update_derived_columns ON jobs;
+
+CREATE TRIGGER trg_update_derived_columns
+BEFORE INSERT OR UPDATE
+ON jobs
+FOR EACH ROW
+EXECUTE PROCEDURE fn_update_derived_columns();
+```
+
+Now, anytime you do an `INSERT` or `UPDATE` on `jobs`, PostgreSQL will call `fn_update_derived_columns()` before completing the write, and your derived columns will be set automatically.
+
+---
+
+## 4) (Optional) Run a One-Time UPDATE for Existing Rows
+
+If you already have rows in the table and want to backfill these columns based on existing JSON, run:
+
+```sql
+UPDATE jobs
+SET
+    -- Force the columns to recalculate:
+    -- We just set them to their own values to trigger BEFORE UPDATE
+    tags = tags
+;
+```
+
+Because of the `BEFORE UPDATE` trigger, doing something like `SET tags = tags` will cause Postgres to run the trigger logic on every row, thereby updating your derived columns. (We basically “touch” the row so the trigger fires.)
+
+If you have a very large table, you may want to break that update into chunks or do it in a maintenance window, as it will re-process every row.
+
+---
+
+## Summary
+
+1. **Add the columns** if they don’t exist.
+2. **Create a trigger function** (`fn_update_derived_columns`) which calculates and sets those columns from your JSON data.
+3. **Attach that function** to the table with a `BEFORE INSERT OR UPDATE` trigger.
+4. **Optionally** do a one-time backfill for existing data.
+
+From then on, **whenever you insert or update a row**, the derived columns will be automatically populated. This is the most common approach in PostgreSQL to keep JSON-derived or computed columns in sync with source fields.
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/secrets/db_password.txt
+================================================================================
+your_secure_db_password
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/secrets/pgadmin_password.txt
+================================================================================
+your_secure_pgadmin_password
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/src/scheduler.py
+================================================================================
+import asyncio
+import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+from .scraper import JobScraper
+from .log_setup import get_logger
+
+class JobScraperScheduler:
+    """
+    A simple scheduler that runs the JobScraper at a regular interval.
+    Useful for time-based scraping (e.g., every 30 minutes).
+    """
+
+    def __init__(
+        self,
+        config_path: str = "config/api_config.yaml",
+        base_dir: str = "job_data",
+        interval_minutes: int = 30,
+    ) -> None:
+        """
+        Initialize the scheduler with the desired interval and config paths.
+
+        Args:
+            config_path (str): Path to the config file for the JobScraper.
+            base_dir (str): Base directory for data.
+            interval_minutes (int): Interval in minutes between each run.
+        """
+        self.config_path = config_path
+        self.base_dir = Path(base_dir)
+        self.interval_minutes = interval_minutes
+        self.logger = get_logger("JobScraperScheduler")
+
+    async def run(self) -> None:
+        """
+        Continuously run the scraper in a loop, pausing interval_minutes between each run.
+        """
+        while True:
+            try:
+                self.logger.info("Starting scraping run in scheduler.")
+                start_time = datetime.now()
+
+                scraper = JobScraper(
+                    config_path=self.config_path,
+                    save_dir=str(self.base_dir),
+                )
+                await scraper.scrape()
+
+                end_time = datetime.now()
+                duration = (end_time - start_time).total_seconds()
+                self.logger.info(
+                    f"Completed scraping run. Duration: {duration:.2f} seconds. "
+                    f"Jobs collected so far: {scraper.total_jobs_scraped}"
+                )
+
+                self.logger.info(f"Waiting {self.interval_minutes} minutes until next run.")
+                await asyncio.sleep(self.interval_minutes * 60)
+            except Exception as e:
+                self.logger.error(f"Error in JobScraperScheduler: {str(e)}")
+                await asyncio.sleep(60)
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/src/__init__.py
+================================================================================
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/src/scraper.py
+================================================================================
+import aiohttp
+import asyncio
+import json
+import traceback
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Union, Any
+
+import pandas as pd
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+from .config_manager import ConfigManager
+from .db_manager import DatabaseManager
+from .log_setup import get_logger
+
+
+class JobScraper:
+    """
+    Asynchronous job scraper that fetches job listings from a specified API,
+    processes them, and optionally stores them in a database or local disk.
+    """
+
+    def __init__(
+        self,
+        config_path: str = "config/api_config.yaml",
+        save_dir: str = "job_data",
+        db_manager: Optional[DatabaseManager] = None,
+    ) -> None:
+        """
+        Initialize the JobScraper with configuration, logging, and optional DB.
+
+        Args:
+            config_path (str): Path to the YAML config file.
+            save_dir (str): Directory to store data and logs (only used if saving locally).
+            db_manager (Optional[DatabaseManager]): If provided, use this manager for DB operations.
+        """
+        self.logger = get_logger("JobScraper")
+
+        # Load configuration (YAML + environment overrides)
+        self.config_manager = ConfigManager(config_path)
+        self.api_config: Dict[str, Any] = self.config_manager.api_config
+        self.request_config: Dict[str, Any] = self.config_manager.request_config
+        self.scraper_config: Dict[str, Any] = self.config_manager.scraper_config
+
+        # Setup directories (if local saving is needed)
+        self.save_dir = Path(save_dir)
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+        self.raw_dir = self.save_dir / "raw_data"
+        self.processed_dir = self.save_dir / "processed_data"
+        self.log_dir = self.save_dir / "logs"
+        for d in [self.raw_dir, self.processed_dir, self.log_dir]:
+            d.mkdir(parents=True, exist_ok=True)
+
+        # Database usage config
+        database_cfg = self.scraper_config.get("database", {})
+        self.db_enabled = database_cfg.get("enabled", False)
+        self.db_manager = db_manager
+        if self.db_enabled and not self.db_manager:
+            # If the database is enabled but no db_manager was passed, create one
+            self.logger.info("Database integration enabled but no manager provided; creating one.")
+            db_config = self.config_manager.database_config
+            self.db_manager = DatabaseManager(
+                connection_string=db_config.get("connection_string"),
+                schema=db_config.get("schema", "public"),
+                batch_size=db_config.get("batch_size", 1000),
+            )
+
+        # API base URL + request headers
+        self.base_url: str = self.api_config["base_url"]
+        self.headers: Dict[str, str] = self.api_config["headers"]
+
+        # Tracking counters
+        self.current_batch: int = 0
+        self.total_jobs_scraped: int = 0
+        self.failed_requests: List[int] = []
+
+        # Concurrency limit for HTTP requests
+        max_concurrent = self.scraper_config.get("max_concurrent_requests", 3)
+        self.semaphore = asyncio.Semaphore(max_concurrent)
+
+        self.logger.info(
+            "JobScraper initialized successfully. Database Enabled? "
+            f"{self.db_enabled}"
+        )
+
+    async def initialize(self) -> bool:
+        """
+        Initialize the scraper, including DB connections if enabled.
+
+        Returns:
+            bool: True if initialization was successful, False otherwise.
+        """
+        try:
+            if self.db_enabled and self.db_manager:
+                self.logger.info("Initializing database connection (JobScraper)...")
+                success = await self.db_manager.initialize()
+                if not success:
+                    # If DB fails, we fallback to local file saving
+                    self.logger.warning("DB initialization failed, falling back to file storage.")
+                    self.db_enabled = False
+            return True
+        except Exception as e:
+            self.logger.error(f"Error during scraper initialization: {str(e)}")
+            return False
+
+    def create_payload(self, page: int = 1) -> Dict[str, Any]:
+        """
+        Create the request payload for a given page using the default request config.
+
+        Args:
+            page (int): Page number to fetch.
+
+        Returns:
+            Dict[str, Any]: JSON body for the POST request.
+        """
+        payload = dict(self.request_config.get("default_payload", {}))
+        payload.update(
+            {
+                "page": page,
+                "pageSize": self.scraper_config.get("batch_size", 100),
+                "nextPageToken": None,
+            }
+        )
+        return payload
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+    async def fetch_jobs(
+        self,
+        session: aiohttp.ClientSession,
+        json_body: Dict[str, Any],
+        page: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fetch jobs from the API with retry logic using tenacity.
+
+        Args:
+            session (aiohttp.ClientSession): Shared session for HTTP requests.
+            json_body (Dict[str, Any]): POST body JSON for the request.
+            page (int): The page number being fetched.
+
+        Returns:
+            Optional[Dict[str, Any]]: Parsed JSON data if successful, else None.
+        """
+        async with self.semaphore:
+            async with session.post(
+                self.base_url,
+                headers=self.headers,
+                json=json_body,
+                timeout=self.scraper_config.get("timeout", 60),
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+                self.logger.info(f"Successfully fetched page {page}")
+                self.logger.debug(
+                    f"Retrieved {len(data.get('data', {}).get('jobPosts', []))} jobs from page {page}"
+                )
+                return data
+
+    async def process_jobs(self, jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Validate each job before insertion. Rely on DB upsert for deduplication.
+
+        Args:
+            jobs (List[Dict[str, Any]]): Raw job data from the API.
+
+        Returns:
+            List[Dict[str, Any]]: Filtered/validated job objects.
+        """
+        processed = []
+        for job in jobs:
+            try:
+                # Basic required fields check
+                if not all(k in job for k in ("id", "title", "activationTime")):
+                    self.logger.warning(
+                        f"Skipping invalid job: {job.get('id', 'unknown')} - missing required fields"
+                    )
+                    continue
+                processed.append(job)
+            except Exception as e:
+                self.logger.error(f"Error processing job: {str(e)}")
+                continue
+        return processed
+
+    async def _process_jobs(self, jobs: List[Dict[str, Any]]) -> int:
+        """
+        Insert or upsert job data into the DB if enabled, otherwise save them to file if configured.
+
+        Args:
+            jobs (List[Dict[str, Any]]): Valid job dictionaries to store.
+
+        Returns:
+            int: Number of jobs successfully processed (upserted or saved).
+        """
+        if not jobs:
+            return 0
+
+        try:
+            batch_id = str(uuid.uuid4())
+
+            # If DB enabled, attempt saving to DB
+            if self.db_enabled and self.db_manager:
+                self.logger.info(f"Saving {len(jobs)} jobs to DB in batch_id={batch_id}")
+                inserted_count = await self.db_manager.insert_jobs(jobs, batch_id)
+                self.logger.info(
+                    f"DB upsert complete: {inserted_count} jobs inserted/updated for batch {batch_id}"
+                )
+
+                # If database saving was successful, skip file saving if config demands
+                if inserted_count > 0 and not self.config_manager.should_save_files_with_db():
+                    self.logger.info("All jobs saved to DB; skipping file-based storage.")
+                    return inserted_count
+
+            # If DB is not enabled OR we want to keep local backups, save to file
+            self.save_batch(jobs, self.current_batch)
+            self.current_batch += 1
+            return len(jobs)
+        except Exception as e:
+            self.logger.error(f"Error in _process_jobs: {str(e)}")
+            return 0
+
+    def save_batch(self, jobs: List[Dict[str, Any]], batch_number: int) -> None:
+        """
+        Optionally save a batch of jobs to JSON, Parquet, and CSV files.
+        Only used if config_manager.should_save_files_with_db() is True or DB is disabled.
+
+        Args:
+            jobs (List[Dict[str, Any]]): List of job items to save.
+            batch_number (int): Index of the current batch.
+        """
+        if not jobs:
+            return
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        batch_name = f"batch_{batch_number:04d}_{timestamp}"
+
+        try:
+            json_path = self.raw_dir / f"{batch_name}.json"
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(jobs, f, ensure_ascii=False, indent=2)
+
+            df = pd.json_normalize(jobs)
+            parquet_path = self.processed_dir / f"{batch_name}.parquet"
+            df.to_parquet(parquet_path, index=False)
+
+            csv_path = self.processed_dir / f"{batch_name}.csv"
+            df.to_csv(csv_path, index=False, encoding="utf-8")
+
+            self.logger.info(
+                f"Saved batch {batch_number} with {len(jobs)} jobs locally. "
+                f"Total jobs scraped so far: {self.total_jobs_scraped}"
+            )
+        except Exception as e:
+            self.logger.error(f"Error saving batch {batch_number}: {str(e)}")
+            self.logger.error(traceback.format_exc())
+
+    async def scrape(self) -> None:
+        """
+        Main scraping loop. Fetch pages until no more data or hitting max_pages / empty pages.
+        """
+        async with aiohttp.ClientSession() as session:
+            page = 1
+            batch_num = 1
+            current_batch_jobs: List[Dict[str, Any]] = []
+            max_pages = self.scraper_config.get("max_pages", 1000)
+
+            consecutive_empty_pages = 0
+            max_empty_pages = self.scraper_config.get("max_empty_pages", 3)
+
+            while page <= max_pages:
+                try:
+                    payload = self.create_payload(page=page)
+                    result = await self.fetch_jobs(session, payload, page)
+
+                    if not result or not result.get("data", {}).get("jobPosts"):
+                        self.logger.info(f"No more jobs found on page {page}, stopping.")
+                        break
+
+                    jobs = result["data"]["jobPosts"]
+                    self.logger.info(f"Retrieved {len(jobs)} jobs from page {page}")
+
+                    if not jobs:
+                        consecutive_empty_pages += 1
+                        self.logger.info(
+                            f"Empty page {page}, consecutive empties: {consecutive_empty_pages}"
+                        )
+                        if consecutive_empty_pages >= max_empty_pages:
+                            self.logger.info(
+                                f"Reached {max_empty_pages} consecutive empty pages; stopping scrape."
+                            )
+                            break
+                        page += 1
+                        continue
+
+                    processed_jobs = await self.process_jobs(jobs)
+                    if processed_jobs:
+                        consecutive_empty_pages = 0
+                        current_batch_jobs.extend(processed_jobs)
+
+                        job_batch_size = self.scraper_config.get("jobs_per_batch", 500)
+                        # Once we have enough jobs to form a full batch, insert them
+                        if len(current_batch_jobs) >= job_batch_size:
+                            processed_count = await self._process_jobs(current_batch_jobs)
+                            self.total_jobs_scraped += processed_count
+
+                            # Save state
+                            await self._save_batch_with_state(current_batch_jobs, batch_num, page)
+                            batch_num += 1
+                            current_batch_jobs = []
+                    else:
+                        consecutive_empty_pages += 1
+                        self.logger.info(
+                            f"No valid new jobs, consecutive empties: {consecutive_empty_pages}"
+                        )
+                        if consecutive_empty_pages >= max_empty_pages:
+                            break
+
+                    page += 1
+                    await asyncio.sleep(self.scraper_config.get("sleep_time", 1))
+
+                except Exception as e:
+                    await self._handle_error(page, e)
+                    if len(self.failed_requests) >= self.scraper_config.get("max_retries", 5):
+                        self.logger.error(f"Too many failed requests, stopping.")
+                        break
+                    await asyncio.sleep(self.scraper_config.get("error_sleep_time", 2))
+
+            # Handle any leftover jobs in final batch
+            if current_batch_jobs:
+                processed_count = await self._process_jobs(current_batch_jobs)
+                self.total_jobs_scraped += processed_count
+                await self._save_batch_with_state(current_batch_jobs, batch_num, page)
+
+            await self._log_final_statistics(pages_processed=page - 1)
+
+    async def _save_batch_with_state(
+        self, jobs: List[Dict[str, Any]], batch_num: int, current_page: int
+    ) -> None:
+        """
+        Save the current state to config_manager after processing a batch of jobs.
+
+        Args:
+            jobs (List[Dict[str, Any]]): The list of processed jobs in the batch.
+            batch_num (int): The batch number index.
+            current_page (int): The last page processed for this batch.
+        """
+        current_state = {
+            "last_page_scraped": current_page,
+            "total_jobs_scraped": self.total_jobs_scraped,
+            "last_batch_num": batch_num,
+            "last_run": datetime.now().isoformat(),
+        }
+        self.config_manager.save_state(current_state)
+        self.logger.debug(f"Updated state after batch {batch_num} on page {current_page}")
+
+    async def _log_final_statistics(self, pages_processed: int) -> None:
+        """
+        Output final scraping statistics to logs and update config_manager.
+
+        Args:
+            pages_processed (int): Number of pages processed in this run.
+        """
+        stats = {
+            "total_jobs_scraped": self.total_jobs_scraped,
+            "pages_processed": pages_processed,
+            "failed_requests": len(self.failed_requests),
+            "end_time": datetime.now().isoformat(),
+        }
+        self.logger.info("Scraping completed. Final statistics:")
+        for k, v in stats.items():
+            self.logger.info(f"{k}: {v}")
+
+        try:
+            self.config_manager.save_state({"last_run_stats": stats, "scraping_complete": True})
+        except Exception as e:
+            self.logger.error(f"Failed to save final statistics: {str(e)}")
+
+    async def _handle_error(self, page: int, error: Exception) -> None:
+        """
+        Handle scraping errors by logging, tracking state, and scheduling a retry if needed.
+
+        Args:
+            page (int): The page number where the error occurred.
+            error (Exception): The exception thrown.
+        """
+        self.logger.error(f"Error on page {page}: {str(error)}")
+        self.logger.error(traceback.format_exc())
+        self.failed_requests.append(page)
+
+        error_state = {
+            "last_error": {
+                "page": page,
+                "error": str(error),
+                "timestamp": datetime.now().isoformat(),
+            },
+            "failed_requests": self.failed_requests,
+        }
+        try:
+            self.config_manager.save_state(error_state)
+        except Exception as ex:
+            self.logger.error(f"Failed to save error state: {str(ex)}")
+
+        # If it's likely a network or timeout error, we can retry
+        if isinstance(error, (aiohttp.ClientError, asyncio.TimeoutError)):
+            retry_delay = self.scraper_config.get("error_sleep_time", 2)
+            self.logger.info(f"Will retry page {page} after {retry_delay} seconds.")
+            await asyncio.sleep(retry_delay)
+        else:
+            self.logger.error("Unrecoverable error encountered. Stopping.")
+            raise
+
+    async def run(self) -> Dict[str, Union[int, str]]:
+        """
+        A convenience method to initialize, start scraping, and handle cleanup.
+
+        Returns:
+            Dict[str, Union[int, str]]: Final scraping statistics.
+        """
+        try:
+            self.logger.info("Starting job scraper run().")
+            await self.initialize()
+            await self.scrape()
+            self.logger.info("Job scraper completed successfully.")
+            return {
+                "total_jobs": self.total_jobs_scraped,
+                "pages_processed": self.current_batch,
+                "status": "completed",
+            }
+        except Exception as e:
+            self.logger.error(f"Error during scraper execution: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return {
+                "total_jobs": 0,
+                "pages_processed": 0,
+                "status": "failed",
+                "error": str(e),
+            }
+        finally:
+            # Close DB connections if used
+            if self.db_enabled and self.db_manager:
+                await self.db_manager.close()
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/src/health.py
+================================================================================
+import asyncio
+import logging
+import json
+import os
+from datetime import datetime
+from typing import Optional, Tuple, Any
+
+import aiohttp
+from aiohttp import web
+import psutil
+
+from .db_manager import DatabaseManager
+from .log_setup import get_logger
+
+logger = get_logger("health_check")
+
+class HealthCheck:
+    """
+    Provides a basic health check and metrics API using aiohttp.
+
+    Attributes:
+        db_manager (DatabaseManager): An instance managing database connectivity.
+        app (web.Application): The aiohttp application object.
+    """
+
+    def __init__(self, db_manager: DatabaseManager) -> None:
+        """
+        Initialize the HealthCheck service with the given DatabaseManager.
+
+        Args:
+            db_manager (DatabaseManager): Instance managing DB operations.
+        """
+        self.db_manager = db_manager
+        self.app = web.Application()
+        self.app.add_routes([
+            web.get('/health', self.health_check),
+            web.get('/metrics', self.metrics),
+        ])
+
+    async def health_check(self, request: web.Request) -> web.Response:
+        """
+        Basic health check endpoint. Verifies database connectivity and returns a JSON status object.
+
+        Args:
+            request (web.Request): Incoming HTTP request (unused).
+
+        Returns:
+            web.Response: JSON response containing health status.
+        """
+        try:
+            if not self.db_manager.is_connected:
+                await self.db_manager.initialize()
+
+            job_count = await self.db_manager.get_job_count()
+            data = {
+                "status": "healthy",
+                "database": "connected",
+                "job_count": job_count,
+                "timestamp": str(datetime.now()),
+            }
+            return web.json_response(data)
+        except Exception as e:
+            logger.error(f"Health check failed: {str(e)}")
+            return web.json_response({
+                "status": "unhealthy",
+                "error": str(e),
+                "timestamp": str(datetime.now()),
+            }, status=500)
+
+    async def metrics(self, request: web.Request) -> web.Response:
+        """
+        Metrics endpoint to gather and expose custom stats about the scraper (e.g., job counts).
+
+        Args:
+            request (web.Request): Incoming HTTP request (unused).
+
+        Returns:
+            web.Response: JSON response with metrics data.
+        """
+        try:
+            job_stats = await self.db_manager.get_job_stats()
+            data = {
+                "metrics": {
+                    "jobs": job_stats,
+                    "system": {"memory_usage": self._get_memory_usage()},
+                },
+                "timestamp": str(datetime.now()),
+            }
+            return web.json_response(data)
+        except Exception as e:
+            logger.error(f"Metrics endpoint failed: {str(e)}")
+            return web.json_response({
+                "status": "error",
+                "error": str(e),
+            }, status=500)
+
+    def _get_memory_usage(self) -> dict:
+        """
+        Gather memory usage stats for the current process.
+
+        Returns:
+            dict: Dictionary of RSS and VMS usage in MB.
+        """
+        process = psutil.Process(os.getpid())
+        return {
+            "rss_mb": process.memory_info().rss / (1024 * 1024),
+            "vms_mb": process.memory_info().vms / (1024 * 1024),
+        }
+
+    async def start(self, host: str = "0.0.0.0", port: int = 8080) -> Tuple[web.AppRunner, web.TCPSite]:
+        """
+        Start the aiohttp server for health checks and metrics.
+
+        Args:
+            host (str): Host interface.
+            port (int): Port to listen on.
+
+        Returns:
+            Tuple[web.AppRunner, web.TCPSite]: references to the created runner and site.
+        """
+        runner = web.AppRunner(self.app)
+        await runner.setup()
+        site = web.TCPSite(runner, host, port)
+        await site.start()
+        logger.info(f"Health check server started on http://{host}:{port}")
+        return runner, site
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/src/log_setup.py
+================================================================================
+"""
+log_setup.py
+Centralized logging configuration to be used by all modules in the Job Scraper project.
+"""
+import logging
+import sys
+from pathlib import Path
+from datetime import datetime
+import os
+
+
+def get_logger(
+    name: str = "job_scraper",
+    log_dir: str = "job_data/logs",
+    log_level_env_var: str = "LOG_LEVEL"
+) -> logging.Logger:
+    """
+    Return a configured logger instance that writes to both console and a rolling file.
+
+    Args:
+        name (str): Name for the logger.
+        log_dir (str): Directory path for log files.
+        log_level_env_var (str): Environment variable to override logging level.
+
+    Returns:
+        logging.Logger: Configured logger.
+    """
+    logger = logging.getLogger(name)
+    if logger.handlers:
+        # Already configured
+        return logger
+
+    # Determine log level
+    log_level_str = os.getenv(log_level_env_var, "INFO").upper()
+    log_level = getattr(logging, log_level_str, logging.INFO)
+
+    # Ensure directory
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file_path = Path(log_dir) / f"{name}_{timestamp}.log"
+
+    # Configure logger
+    logger.setLevel(log_level)
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s - %(message)s")
+
+    # File handler
+    fh = logging.FileHandler(log_file_path, encoding="utf-8")
+    fh.setLevel(log_level)
+    fh.setFormatter(formatter)
+
+    # Console handler
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(log_level)
+    ch.setFormatter(formatter)
+
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+    logger.propagate = False
+
+    logger.info(f"Logger {name} initialized at level {log_level_str}. Log file: {log_file_path}")
+    return logger
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/src/config_manager.py
+================================================================================
+import json
+import logging
+import os
+import yaml
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Any, Optional
+
+from .log_setup import get_logger
+
+# Central logger for ConfigManager
+logger = get_logger("ConfigManager")
+
+
+class ConfigManager:
+    """
+    Manages configuration and state for the job scraper.
+    Loads from a YAML file and optionally merges environment variables.
+    Also handles saving 'state' to allow resuming or tracking scraping progress.
+    """
+
+    def __init__(self, config_path: str = "config/api_config.yaml") -> None:
+        """
+        Initialize the config manager and load the YAML configuration.
+
+        Args:
+            config_path (str): Path to the YAML config file.
+        """
+        self.config_path: str = config_path
+        # Immediately load config from YAML + any environment overrides
+        self._load_config()
+
+        # Setup the directory for storing persistent 'state' JSON
+        self.state_dir = Path("job_data/state")
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.state_file = self.state_dir / "scraper_state.json"
+
+    def _load_config(self) -> None:
+        """
+        Load configuration from the specified YAML file
+        and parse it into class attributes (api_config, request_config, scraper_config, etc.).
+        """
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+
+            # Sections from YAML
+            self.api_config: Dict[str, Any] = config.get("api", {})
+            self.request_config: Dict[str, Any] = config.get("request", {})
+            self.scraper_config: Dict[str, Any] = config.get("scraper", {})
+            self.database_config: Dict[str, Any] = config.get("database", {})
+
+            # Warn if critical sections are missing
+            if not self.api_config:
+                logger.warning("API configuration section is missing or empty")
+            if not self.request_config:
+                logger.warning("Request configuration is missing or empty")
+            if not self.scraper_config:
+                logger.warning("Scraper configuration is missing or empty")
+
+            logger.info("Configuration loaded successfully from YAML")
+        except FileNotFoundError:
+            logger.error(f"Configuration file not found: {self.config_path}")
+            raise
+        except yaml.YAMLError as e:
+            logger.error(f"Error parsing YAML: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error loading configuration: {str(e)}")
+            raise
+
+    def load_state(self) -> Dict[str, Any]:
+        """
+        Load the latest scraper state from a JSON file, or return an empty dict if none exists.
+
+        Returns:
+            Dict[str, Any]: The loaded state dictionary.
+        """
+        if not self.state_file.exists():
+            logger.info("No state file found. Starting fresh.")
+            return {}
+        try:
+            with open(self.state_file, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            logger.info(f"Loaded state from {self.state_file}")
+            return state
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing state file: {str(e)}")
+            return {}
+        except Exception as e:
+            logger.error(f"Error loading state: {str(e)}")
+            return {}
+
+    def save_state(self, state_update: Dict[str, Any]) -> None:
+        """
+        Update and persist the scraper state with new values in JSON form.
+
+        Args:
+            state_update (Dict[str, Any]): Key-value pairs to update in the stored state.
+        """
+        try:
+            current_state = self.load_state()
+            current_state.update(state_update)
+
+            # Always store a timestamp of the last update if not included
+            if "last_updated" not in state_update:
+                current_state["last_updated"] = datetime.now().isoformat()
+
+            with open(self.state_file, "w", encoding="utf-8") as f:
+                json.dump(current_state, f, indent=2, ensure_ascii=False)
+
+            # Optionally create a backup if configured in 'state_tracking'
+            backup_count = self.scraper_config.get("state_tracking", {}).get("backup_count", 3)
+            if backup_count > 0:
+                self._create_state_backup(backup_count)
+
+            logger.debug("State updated successfully")
+        except Exception as e:
+            logger.error(f"Error saving state: {str(e)}")
+
+    def _create_state_backup(self, backup_count: int) -> None:
+        """
+        Create a timestamped backup of the current state file, then remove older backups.
+
+        Args:
+            backup_count (int): Number of backups to keep.
+        """
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_file = self.state_dir / f"scraper_state_{timestamp}.json"
+
+            if self.state_file.exists():
+                with open(self.state_file, "r", encoding="utf-8") as src:
+                    with open(backup_file, "w", encoding="utf-8") as dst:
+                        dst.write(src.read())
+
+            # Remove oldest backups if exceeding backup_count
+            backups = sorted(self.state_dir.glob("scraper_state_*.json"))
+            if len(backups) > backup_count:
+                for old_backup in backups[:-backup_count]:
+                    old_backup.unlink()
+        except Exception as e:
+            logger.error(f"Error creating state backup: {str(e)}")
+
+    def should_save_files_with_db(self) -> bool:
+        """
+        Check if we should still save raw JSON/CSV/Parquet locally
+        even when the database is enabled.
+
+        Returns:
+            bool: True if local file saving is desired alongside DB usage.
+        """
+        return self.database_config.get("save_raw_data", True)
+
+    def get_db_connection_string(self) -> Optional[str]:
+        """
+        Return the database connection string if 'enabled' is True in the config.
+
+        Returns:
+            Optional[str]: Connection URI or None if the database is not enabled.
+        """
+        if self.database_config.get("enabled", False):
+            return self.database_config.get("connection_string")
+        return None
+
+    def get_max_concurrent_requests(self) -> int:
+        """
+        Get the maximum number of concurrent HTTP requests allowed by the scraper.
+
+        Returns:
+            int: The concurrency limit (default 3 if missing).
+        """
+        return self.scraper_config.get('max_concurrent_requests', 3)
+
+    def get_rate_limits(self) -> Dict[str, int]:
+        """
+        Get rate-limiting parameters from the config (requests_per_minute, burst).
+
+        Returns:
+            dict: Rate limit parameters.
+        """
+        rate_limit = self.scraper_config.get('rate_limit', {})
+        return {
+            'requests_per_minute': rate_limit.get('requests_per_minute', 60),
+            'burst': rate_limit.get('burst', 5)
+        }
+
+    def get_retry_config(self) -> Dict[str, Any]:
+        """
+        Get retry-related parameters for controlling backoff logic.
+
+        Returns:
+            dict: Contains max_retries, min_delay, max_delay used for tenacity or similar.
+        """
+        return {
+            'max_retries': self.scraper_config.get('max_retries', 5),
+            'min_delay': self.scraper_config.get('retry_delay', {}).get('min', 2),
+            'max_delay': self.scraper_config.get('retry_delay', {}).get('max', 10)
+        }
+
+    def get_monitoring_config(self) -> Dict[str, Any]:
+        """
+        Retrieve monitoring-related configuration if present.
+
+        Returns:
+            dict: A dictionary of monitoring settings (metrics, thresholds, etc.).
+        """
+        return self.scraper_config.get('monitoring', {})
+
+    def update_config(self, section: str, key: str, value: Any) -> None:
+        """
+        Update a specific configuration value in the YAML file, then reload.
+
+        Args:
+            section (str): Name of the top-level config section (e.g. 'scraper', 'database').
+            key (str): Key within that section.
+            value (Any): New value to store.
+        """
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+
+            if section not in config:
+                config[section] = {}
+            config[section][key] = value
+
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                yaml.dump(config, f, default_flow_style=False)
+
+            # Reload the config into memory
+            self._load_config()
+            logger.info(f"Updated config: {section}.{key} = {value}")
+
+        except Exception as e:
+            logger.error(f"Error updating config: {str(e)}")
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/src/db_manager.py
+================================================================================
+import asyncio
+import logging
+import json
+import time
+import traceback
+from datetime import datetime
+from typing import Dict, List, Any, Optional, Union
+
+import asyncpg
+import pandas as pd
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+
+from .log_setup import get_logger
+
+# Declare a base for any ORM models if needed.
+Base = declarative_base()
+
+# Create a logger specifically for the DatabaseManager.
+logger = get_logger("DatabaseManager")
+
+
+class DatabaseManager:
+    """
+    Manages database operations for the job scraper,
+    including initializing connections, creating tables,
+    and upserting job data in bulk.
+    """
+
+    def __init__(
+        self,
+        connection_string: str,
+        schema: str = "public",
+        batch_size: int = 1000
+    ) -> None:
+        """
+        Initialize the database manager with connection details.
+
+        Args:
+            connection_string (str): PostgreSQL connection URI.
+            schema (str): DB schema. Defaults to "public".
+            batch_size (int): Max chunk size for inserts. Defaults to 1000.
+        """
+        self.connection_string: str = connection_string
+        self.schema: str = schema
+        self.batch_size: int = batch_size
+        self.engine = None  # Will hold a SQLAlchemy engine if needed.
+        self.pool: Optional[asyncpg.pool.Pool] = None
+        self.is_connected: bool = False
+
+        # Optional metrics tracking.
+        self.metrics: Dict[str, Union[int, float]] = {
+            "total_jobs_inserted": 0,
+            "total_jobs_updated": 0,
+            "total_batches": 0,
+            "failed_operations": 0,
+            "avg_insertion_time": 0.0,
+        }
+
+    async def initialize(self) -> bool:
+        """
+        Initialize database connections and create required tables.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+        try:
+            # Create an optional SQLAlchemy engine (useful for schema tasks).
+            self.engine = create_engine(self.connection_string)
+
+            # Parse the connection string for asyncpg and create a connection pool.
+            conn_params = self._parse_connection_string(self.connection_string)
+            self.pool = await asyncpg.create_pool(**conn_params)
+
+            # Test the connection by fetching the version and creating tables.
+            async with self.pool.acquire() as conn:
+                version = await conn.fetchval("SELECT version()")
+                logger.info(f"Connected to database: {version}")
+                await self._create_tables()
+
+            self.is_connected = True
+            logger.info("Database connection established and tables verified")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {str(e)}")
+            logger.error(traceback.format_exc())
+            return False
+
+    def _parse_connection_string(self, conn_string: str) -> Dict[str, Union[str, int]]:
+        """
+        Convert a PostgreSQL connection URI into parameters for asyncpg.
+
+        Args:
+            conn_string (str): PostgreSQL URI (e.g., postgresql://user:pass@host:port/dbname).
+
+        Returns:
+            Dict[str, Union[str, int]]: Connection parameters.
+        """
+        temp = conn_string
+        if temp.startswith("postgresql://"):
+            temp = temp.replace("postgresql://", "")
+        elif temp.startswith("postgresql+psycopg2://"):
+            temp = temp.replace("postgresql+psycopg2://", "")
+
+        auth, rest = temp.split("@", 1)
+        host_port, database = rest.split("/", 1)
+
+        if ":" in auth:
+            user, password = auth.split(":", 1)
+        else:
+            user, password = auth, ""
+
+        if ":" in host_port:
+            host, port_str = host_port.split(":", 1)
+            port = int(port_str)
+        else:
+            host, port = host_port, 5432
+
+        # Remove any query parameters if present.
+        if "?" in database:
+            database = database.split("?", 1)[0]
+
+        return {
+            "user": user,
+            "password": password,
+            "host": host,
+            "port": port,
+            "database": database,
+        }
+
+    async def _create_tables(self) -> None:
+        """
+        Create necessary schema/tables if not present.
+        """
+        async with self.pool.acquire() as conn:
+            # Ensure the schema exists.
+            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self.schema}")
+
+            # Main jobs table.
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self.schema}.jobs (
+                    id TEXT PRIMARY KEY,
+                    title TEXT,
+                    url TEXT,
+                    locations JSONB,
+                    work_types JSONB,
+                    salary JSONB,
+                    gender TEXT,
+                    tags JSONB,
+                    item_index INTEGER,
+                    job_post_categories JSONB,
+                    company_fa_name TEXT,
+                    province_match_city TEXT,
+                    normalize_salary_min FLOAT,
+                    normalize_salary_max FLOAT,
+                    payment_method TEXT,
+                    district TEXT,
+                    company_title_fa TEXT,
+                    job_board_id TEXT,
+                    job_board_title_en TEXT,
+                    activation_time TIMESTAMP,
+                    company_id TEXT,
+                    company_name_fa TEXT,
+                    company_name_en TEXT,
+                    company_about TEXT,
+                    company_url TEXT,
+                    location_ids TEXT,
+                    tag_number TEXT,
+                    raw_data JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    batch_id TEXT,
+                    batch_date TIMESTAMP
+                )
+                """
+            )
+
+            # Temporary table for staging bulk upserts.
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self.schema}.jobs_temp (
+                    LIKE {self.schema}.jobs INCLUDING ALL
+                )
+                """
+            )
+
+            # Table for tracking batches.
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self.schema}.job_batches (
+                    batch_id TEXT PRIMARY KEY,
+                    batch_date TIMESTAMP,
+                    job_count INTEGER,
+                    source TEXT,
+                    processing_time FLOAT,
+                    status TEXT,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP
+                )
+                """
+            )
+
+            # Table for recording overall scraper statistics.
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self.schema}.scraper_stats (
+                    id SERIAL PRIMARY KEY,
+                    run_date TIMESTAMP,
+                    total_jobs_scraped INTEGER,
+                    new_jobs_found INTEGER,
+                    pages_processed INTEGER,
+                    processing_time FLOAT,
+                    errors INTEGER,
+                    status TEXT,
+                    metadata JSONB
+                )
+                """
+            )
+
+            # Useful indexes.
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_jobs_activation_time ON {self.schema}.jobs (activation_time)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_jobs_batch_id ON {self.schema}.jobs (batch_id)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_jobs_company_id ON {self.schema}.jobs (company_id) WHERE company_id IS NOT NULL"
+            )
+
+            # Trigger function to auto-update the 'updated_at' column.
+            await conn.execute(
+                f"""
+                CREATE OR REPLACE FUNCTION {self.schema}.update_updated_at_column()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    NEW.updated_at = NOW();
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE 'plpgsql';
+                """
+            )
+            await conn.execute(
+                f"""
+                DROP TRIGGER IF EXISTS update_jobs_updated_at ON {self.schema}.jobs;
+                CREATE TRIGGER update_jobs_updated_at
+                BEFORE UPDATE ON {self.schema}.jobs
+                FOR EACH ROW
+                EXECUTE FUNCTION {self.schema}.update_updated_at_column();
+                """
+            )
+
+    async def insert_jobs(self, jobs: List[Dict[str, Any]], batch_id: str) -> int:
+        """
+        Insert or upsert a list of jobs. This method uses a temporary table
+        for staging, then performs an upsert into the main jobs table.
+        It also includes a debug step to log any potential type mismatches.
+
+        Args:
+            jobs (List[Dict[str, Any]]): List of job dictionaries.
+            batch_id (str): Unique identifier for this batch.
+
+        Returns:
+            int: Total number of rows inserted or updated.
+        """
+        if not jobs:
+            return 0
+
+        batch_date = datetime.now()
+        inserted_count = 0
+        start_time = time.time()
+
+        try:
+            # Record the start of the batch.
+            await self._start_batch(batch_id, batch_date, len(jobs))
+
+            # Process jobs in chunks.
+            for i in range(0, len(jobs), self.batch_size):
+                chunk = jobs[i : i + self.batch_size]
+                # Transform each job into a dictionary with proper type casting.
+                values = [self._transform_job_for_db(j, batch_id, batch_date) for j in chunk]
+
+                async with self.pool.acquire() as conn:
+                    columns = list(values[0].keys())
+
+                    async with conn.transaction():
+                        # Truncate the temporary table before inserting the chunk.
+                        await conn.execute(f"TRUNCATE TABLE {self.schema}.jobs_temp")
+
+                        # Convert each job dictionary to a list of values.
+                        records = [[row_dict[col] for col in columns] for row_dict in values]
+
+                        # --- DEBUG STEP ---
+                        # Iterate over each record and each column.
+                        # For columns defined as TEXT, log an error if a non-string type is found.
+                        for row_index, record in enumerate(records):
+                            for col_index, cell_value in enumerate(record):
+                                if columns[col_index] in [
+                                    "id", "title", "url", "gender", "province_match_city",
+                                    "payment_method", "district", "company_fa_name",
+                                    "company_title_fa", "job_board_id", "job_board_title_en",
+                                    "company_id", "company_name_fa", "company_name_en",
+                                    "company_about", "company_url", "location_ids",
+                                    "tag_number", "batch_id"
+                                ]:
+                                    if cell_value is not None and not isinstance(cell_value, str):
+                                        logger.error(
+                                            f"DEBUG: Potential mismatch at record {row_index}, "
+                                            f"column '{columns[col_index]}' - found {type(cell_value).__name__} value: {cell_value}"
+                                        )
+
+                        # Bulk copy the records into the temporary table.
+                        await conn.copy_records_to_table(
+                            table_name="jobs_temp",
+                            records=records,
+                            columns=columns,
+                            schema_name=self.schema
+                        )
+
+                        # Build the upsert query.
+                        col_updates = ", ".join(
+                            f"{col} = EXCLUDED.{col}" for col in columns if col != "id"
+                        )
+                        upsert_query = f"""
+                            INSERT INTO {self.schema}.jobs ({', '.join(columns)})
+                            SELECT {', '.join(columns)}
+                            FROM {self.schema}.jobs_temp
+                            ON CONFLICT (id) DO UPDATE
+                            SET {col_updates}, updated_at = CURRENT_TIMESTAMP
+                        """
+                        result = await conn.execute(upsert_query)
+                        logger.info(f"Upsert result for chunk: {result}")
+                        affected = int(result.split()[-1])
+                        inserted_count += affected
+
+            processing_time = time.time() - start_time
+            await self._complete_batch(batch_id, batch_date, len(jobs), processing_time)
+            logger.info(f"Upsert completed for batch {batch_id} - total rows: {inserted_count}")
+            return inserted_count
+
+        except Exception as e:
+            logger.error(f"Error inserting jobs into database: {str(e)}")
+            logger.error(traceback.format_exc())
+            await self._fail_batch(batch_id, batch_date, str(e))
+            return 0
+
+    def _transform_job_for_db(
+        self,
+        job: Dict[str, Any],
+        batch_id: str,
+        batch_date: datetime
+    ) -> Dict[str, Any]:
+        """
+        Transform a raw job dictionary into a dictionary suitable for DB insertion.
+        This function explicitly casts values for TEXT columns to strings and
+        converts numeric fields appropriately.
+
+        Args:
+            job (Dict[str, Any]): The raw job data from the API.
+            batch_id (str): The current batch identifier.
+            batch_date (datetime): Timestamp for the batch.
+
+        Returns:
+            Dict[str, Any]: Transformed job data with proper types.
+        """
+        # Convert activation time string to datetime object.
+        activation_time = None
+        if "activationTime" in job and isinstance(job["activationTime"], dict):
+            date_str = job["activationTime"].get("date")
+            if date_str:
+                for fmt in ["%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"]:
+                    try:
+                        activation_time = datetime.strptime(date_str, fmt)
+                        break
+                    except ValueError:
+                        continue
+
+        # Build a string for location IDs (e.g., "001,002").
+        location_ids = []
+        locs = job.get("locations", [])
+        if isinstance(locs, list):
+            for loc in locs:
+                if isinstance(loc, dict):
+                    province_obj = loc.get("province")
+                    city_obj = loc.get("city")
+                    if province_obj and "id" in province_obj:
+                        location_ids.append(province_obj["id"])
+                    if city_obj and "id" in city_obj:
+                        location_ids.append(city_obj["id"])
+        location_ids_str = ",".join(f"{lid_:03d}" for lid_ in location_ids) if location_ids else ""
+
+        # Return the transformed job record.
+        # Note: For columns defined as TEXT in the schema, we convert the value to a string.
+        return {
+            "id": str(job.get("id")) if job.get("id") is not None else None,
+            "title": str(job.get("title")) if job.get("title") is not None else None,
+            "url": str(job.get("url")) if job.get("url") is not None else None,
+            "locations": self._safe_json_dumps(job.get("locations", [])),
+            "work_types": self._safe_json_dumps(job.get("workTypes", [])),
+            "salary": self._safe_json_dumps(job.get("salary", {})),
+            "gender": str(job.get("gender")) if job.get("gender") is not None else None,
+            "tags": self._safe_json_dumps(job.get("tags", [])),
+            "item_index": job.get("itemIndex"),
+            "job_post_categories": self._safe_json_dumps(job.get("jobPostCategories", [])),
+            "company_fa_name": str(job.get("companyFaName")) if job.get("companyFaName") is not None else None,
+            "province_match_city": str(job.get("provinceMatchCity")) if job.get("provinceMatchCity") is not None else None,
+            "normalize_salary_min": float(job.get("normalizeSalaryMin")) if job.get("normalizeSalaryMin") is not None else None,
+            "normalize_salary_max": float(job.get("normalizeSalaryMax")) if job.get("normalizeSalaryMax") is not None else None,
+            "payment_method": str(job.get("paymentMethod")) if job.get("paymentMethod") is not None else None,
+            "district": str(job.get("district")) if job.get("district") is not None else None,
+            "company_title_fa": str(job.get("companyTitleFa")) if job.get("companyTitleFa") is not None else None,
+            "job_board_id": str(job.get("jobBoardId")) if job.get("jobBoardId") is not None else None,
+            "job_board_title_en": str(job.get("jobBoardTitleEn")) if job.get("jobBoardTitleEn") is not None else None,
+            "activation_time": activation_time,
+            "company_id": str(job.get("companyDetailsSummary", {}).get("id")) if job.get("companyDetailsSummary", {}).get("id") is not None else None,
+            "company_name_fa": str(job.get("companyDetailsSummary", {}).get("name", {}).get("titleFa")) if job.get("companyDetailsSummary", {}).get("name", {}).get("titleFa") is not None else None,
+            "company_name_en": str(job.get("companyDetailsSummary", {}).get("name", {}).get("titleEn")) if job.get("companyDetailsSummary", {}).get("name", {}).get("titleEn") is not None else None,
+            "company_about": str(job.get("companyDetailsSummary", {}).get("about", {}).get("titleFa")) if job.get("companyDetailsSummary", {}).get("about", {}).get("titleFa") is not None else None,
+            "company_url": str(job.get("companyDetailsSummary", {}).get("url")) if job.get("companyDetailsSummary", {}).get("url") is not None else None,
+            "location_ids": location_ids_str,
+            "tag_number": self._extract_tag_number(job),
+            "raw_data": self._safe_json_dumps(job),
+            "batch_id": str(batch_id),
+            "batch_date": batch_date,
+        }
+
+    def _extract_tag_number(self, job: Dict[str, Any]) -> str:
+        """
+        Convert textual tags to numeric codes. Returns a comma-separated
+        string of codes based on a predefined mapping.
+
+        Args:
+            job (Dict[str, Any]): A job record.
+
+        Returns:
+            str: Comma-separated numeric codes, or "0" if no tags.
+        """
+        tag_map = {
+            "پاره وقت": 1,
+            "بدون نیاز به سابقه": 2,
+            "پروژه ای": 3,
+            "کارآموزی": 4,
+        }
+        tags_list = job.get("tags", [])
+        if not isinstance(tags_list, list):
+            return "0"
+
+        numeric_tags = [tag_map.get(t, 0) for t in tags_list]
+        unique_sorted_codes = sorted(set(numeric_tags))
+        if unique_sorted_codes:
+            return ",".join(str(x) for x in unique_sorted_codes)
+        return "0"
+
+    def _safe_json_dumps(self, obj: Any) -> str:
+        """
+        Safely serialize an object to JSON. If serialization fails,
+        return an appropriate fallback.
+
+        Args:
+            obj (Any): The object to serialize.
+
+        Returns:
+            str: JSON string or a fallback string.
+        """
+        try:
+            return json.dumps(obj, ensure_ascii=False)
+        except (TypeError, ValueError, OverflowError) as e:
+            logger.warning(f"Error serializing to JSON: {str(e)}")
+            if isinstance(obj, dict):
+                return "{}"
+            elif isinstance(obj, list):
+                return "[]"
+            else:
+                return '""'
+
+    async def _start_batch(self, batch_id: str, batch_date: datetime, job_count: int) -> None:
+        """
+        Record the start of a batch by inserting a record into the job_batches table.
+
+        Args:
+            batch_id (str): Unique batch identifier.
+            batch_date (datetime): Timestamp when the batch started.
+            job_count (int): Number of jobs in the batch.
+        """
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self.schema}.job_batches
+                    (batch_id, batch_date, job_count, source, processing_time, status, created_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (batch_id)
+                    DO UPDATE
+                      SET job_count = $3,
+                          status = $6,
+                          created_at = $7
+                    """,
+                    batch_id,
+                    batch_date,
+                    job_count,
+                    "api_scraper",
+                    0.0,
+                    "processing",
+                    datetime.now(),
+                )
+        except Exception as e:
+            logger.error(f"Failed to record batch start for {batch_id}: {str(e)}")
+
+    async def _complete_batch(
+        self,
+        batch_id: str,
+        batch_date: datetime,
+        job_count: int,
+        processing_time: float
+    ) -> None:
+        """
+        Mark a batch as complete by updating the job_batches table.
+
+        Args:
+            batch_id (str): Batch identifier.
+            batch_date (datetime): Original batch timestamp.
+            job_count (int): Number of jobs processed.
+            processing_time (float): Total processing time in seconds.
+        """
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self.schema}.job_batches
+                    (batch_id, batch_date, job_count, source, processing_time, status, completed_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (batch_id)
+                    DO UPDATE
+                      SET job_count = $3,
+                          processing_time = $5,
+                          status = $6,
+                          completed_at = $7
+                    """,
+                    batch_id,
+                    batch_date,
+                    job_count,
+                    "api_scraper",
+                    processing_time,
+                    "completed",
+                    datetime.now(),
+                )
+        except Exception as e:
+            logger.error(f"Failed to record batch completion for {batch_id}: {str(e)}")
+
+    async def _fail_batch(
+        self,
+        batch_id: str,
+        batch_date: datetime,
+        error_message: str
+    ) -> None:
+        """
+        Mark a batch as failed in the job_batches table, storing the error message.
+
+        Args:
+            batch_id (str): Batch identifier.
+            batch_date (datetime): Batch start timestamp.
+            error_message (str): Error details.
+        """
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self.schema}.job_batches
+                    (batch_id, batch_date, source, status, error_message, completed_at)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (batch_id)
+                    DO UPDATE
+                      SET status = $4,
+                          error_message = $5,
+                          completed_at = $6
+                    """,
+                    batch_id,
+                    batch_date,
+                    "api_scraper",
+                    "failed",
+                    error_message,
+                    datetime.now(),
+                )
+        except Exception as e:
+            logger.error(f"Failed to record batch failure for {batch_id}: {str(e)}")
+
+    async def get_job_count(self) -> int:
+        """
+        Retrieve the total number of job records in the jobs table.
+
+        Returns:
+            int: Count of jobs.
+        """
+        if not self.pool:
+            return 0
+        try:
+            async with self.pool.acquire() as conn:
+                return await conn.fetchval(f"SELECT COUNT(*) FROM {self.schema}.jobs")
+        except Exception as e:
+            logger.error(f"Error getting job count: {str(e)}")
+            return 0
+
+    async def record_scraper_stats(self, stats: Dict[str, Any]) -> bool:
+        """
+        Insert a record of scraper run statistics into the scraper_stats table.
+
+        Args:
+            stats (Dict[str, Any]): Dictionary containing run statistics.
+
+        Returns:
+            bool: True if recording succeeded, else False.
+        """
+        if not self.pool:
+            return False
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self.schema}.scraper_stats
+                    (run_date, total_jobs_scraped, new_jobs_found, pages_processed,
+                     processing_time, errors, status, metadata)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    """,
+                    datetime.now(),
+                    stats.get("total_jobs_scraped", 0),
+                    stats.get("new_jobs_found", 0),
+                    stats.get("pages_processed", 0),
+                    stats.get("processing_time", 0.0),
+                    stats.get("errors", 0),
+                    stats.get("status", "completed"),
+                    json.dumps(stats.get("metadata", {})),
+                )
+            return True
+        except Exception as e:
+            logger.error(f"Error recording scraper stats: {str(e)}")
+            return False
+
+    async def close(self) -> None:
+        """
+        Cleanly close the asyncpg pool and dispose of the SQLAlchemy engine.
+        """
+        if self.pool:
+            await self.pool.close()
+        if self.engine:
+            self.engine.dispose()
+        logger.info("Database connections closed")
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/config/api_config.yaml
+================================================================================
+# ==============================================
+# API Configuration
+# ==============================================
+api:
+  # Base URL for the job posts API endpoint.
+  base_url: "https://api.karbord.io/api/v1/Candidate/JobPost/GetList"
+  
+  # HTTP headers for all API requests.
+  headers:
+    accept: "application/json, text/plain, */*"
+    accept-encoding: "gzip, deflate, br, zstd"
+    accept-language: "en-US,en;q=0.9"
+    # Unique client identifier; can be overridden by environment variables if needed.
+    clientid: "4575772"
+    content-type: "application/json"
+    ngsw-bypass: "true"
+    origin: "https://karbord.io"
+    referer: "https://karbord.io/"
+    sec-ch-ua: '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"'
+    sec-ch-ua-mobile: "?0"
+    sec-ch-ua-platform: '"Windows"'
+    sec-fetch-dest: "empty"
+    sec-fetch-mode: "cors"
+    sec-fetch-site: "same-site"
+    user-agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+
+# ==============================================
+# Default Request Payload
+# ==============================================
+request:
+  default_payload:
+    isInternship: false
+    isRemote: false
+    location: null
+    publishDate: null
+    workType: null
+    pageSize: 100         # Number of items to request per page.
+    sort: 0
+    searchId: null
+    jobPostCategories: [] # Categories for filtering job posts.
+    jobBoardIds: []       # List of job board IDs to filter by.
+    hasNoWorkExperienceRequirement: false
+    clientId: 4558668     # Must match the API's expected client ID.
+    page: 1               # Default starting page.
+    nextPageToken: null   # Token for pagination if required.
+
+# ==============================================
+# Scraper Configuration
+# ==============================================
+scraper:
+
+  # ==============================================
+# Database Configuration
+# ==============================================
+  database:
+    enabled: true
+    # Use environment variables or secrets in production to secure the connection string.
+    connection_string: "postgresql://username:password@localhost:5432/jobsdb"
+    schema: "public"
+    batch_size: 1000         # Maximum number of jobs per bulk insert.
+    save_raw_data: true      # Option to also save raw data locally.
+    max_connections: 10
+    retry_attempts: 3
+    retry_delay: 5           # Delay (in seconds) between retry attempts.
+
+  # Batch and Pagination Settings
+  batch_size: 100            # Number of jobs per API request (batch).
+  jobs_per_batch: 1000       # Total jobs to accumulate before processing a full batch.
+  max_pages: 9000            # Maximum number of pages to scrape in one run.
+  chunk_size: 1000           # Chunk size when processing/inserting jobs.
+
+  # Resource and Concurrency Settings
+  memory_limit: 1024         # Maximum allowed memory usage in MB.
+  max_concurrent_requests: 5 # Limit on simultaneous HTTP requests.
+  timeout: 60                # HTTP request timeout in seconds.
+
+  # Timing and Rate Limiting Settings
+  sleep_time: 0.5            # Base delay between API requests (in seconds).
+  rate_limit:
+    requests_per_minute: 120 # Maximum number of API requests per minute.
+    burst: 10                # Maximum burst (immediate) requests allowed.
+
+  # Retry Logic
+  max_retries: 5             # Maximum number of retries on failure.
+  retry_delay:
+    min: 2                   # Minimum delay before a retry (seconds).
+    max: 10                  # Maximum delay before a retry (seconds).
+
+  # Resume and Empty-Page Logic
+  lookback_pages: 5          # Number of pages to look back when resuming.
+  minimum_pages: 10          # Minimum pages to check before stopping.
+  max_empty_pages: 3         # Maximum consecutive empty pages allowed.
+  max_resume_age: 86400      # Maximum age (in seconds) of previous state to resume.
+
+  # State Management
+  state_tracking:
+    enabled: true
+    save_interval: 300       # Time interval (in seconds) to auto-save the state.
+    backup_count: 3          # Number of state backups to retain.
+
+  # Timestamp Formatting
+  timestamp_settings:
+    format: "%Y-%m-%dT%H:%M:%S.%fZ"  # Expected timestamp format.
+    timezone: "UTC"
+
+  # Job Deduplication
+  deduplication:
+    enabled: true
+    method: "id_based"       # Deduplication strategy: use 'id_based' or 'content_based'.
+    cache_size: 10000        # Maximum number of job IDs to keep in memory.
+
+  # Monitoring and Alerts
+  monitoring:
+    enabled: true
+    metrics:
+      - new_jobs_count     # Count of new jobs found.
+      - processing_time    # Time taken for processing.
+      - memory_usage       # Memory usage statistics.
+      - request_latency    # Latency of API requests.
+    alert_thresholds:
+      max_errors_per_minute: 10  # Threshold for error alerts.
+      max_memory_percent: 90     # Maximum memory usage percentage.
+      max_latency_ms: 5000       # Maximum allowed latency in milliseconds.
+
+  # Data Validation
+  validation:
+    enabled: true
+    required_fields:
+      - id
+      - title
+      - posted_at         # Ensure each job contains these fields.
+
+  # Output Settings (for local backups)
+  output:
+    format: "json"           # File format for output (e.g., JSON).
+    compression: true        # Whether to compress output files.
+    batch_prefix: "batch_"   # Prefix used for naming batch files.
+    timestamp_format: "%Y%m%d_%H%M%S"  # Timestamp format in filenames.
+
+  # Cleanup Settings (for temporary files)
+  cleanup:
+    enabled: true
+    max_age_days: 7          # Remove files older than 7 days.
+    keep_last_n_batches: 50  # Always keep the most recent 50 batches.
+
+  # Debug Options
+  debug:
+    enabled: true
+    verbose_logging: true
+    save_raw_responses: true
+
+
+
+================================================================================
+File Path: /home/rick/job-scraper/job_scraper_db/init-db/01-init.sql
+================================================================================
+-- Create schema and extensions
+CREATE SCHEMA IF NOT EXISTS public;
+
+-- Create a health check function
+CREATE OR REPLACE FUNCTION public.health_check()
+RETURNS TEXT AS $$
+BEGIN
+    RETURN 'OK';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Set default permissions
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO jobuser;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO jobuser;
+

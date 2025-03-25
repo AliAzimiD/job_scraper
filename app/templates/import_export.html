@@ -1,0 +1,525 @@
+{% extends "base.html" %}
+
+{% block title %}Import/Export - Job Scraper{% endblock %}
+
+{% block styles %}
+{{ super() }}
+<style>
+    .format-card {
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border: 2px solid transparent;
+    }
+
+    .format-card:hover {
+        transform: translateY(-5px);
+    }
+
+    .format-card.selected {
+        border-color: #0d6efd;
+        background-color: rgba(13, 110, 253, 0.05);
+    }
+
+    .format-icon {
+        font-size: 2rem;
+        margin-bottom: 1rem;
+    }
+
+    .json-icon {
+        color: #ffc107;
+    }
+
+    .csv-icon {
+        color: #198754;
+    }
+
+    .sql-icon {
+        color: #0d6efd;
+    }
+
+    .upload-box {
+        border: 2px dashed #dee2e6;
+        padding: 2rem;
+        text-align: center;
+        transition: all 0.2s ease;
+        background-color: #f8f9fa;
+    }
+
+    .upload-box:hover,
+    .upload-box.dragover {
+        border-color: #0d6efd;
+        background-color: rgba(13, 110, 253, 0.05);
+    }
+
+    .upload-icon {
+        font-size: 3rem;
+        color: #6c757d;
+        margin-bottom: 1rem;
+    }
+
+    .custom-file-input {
+        cursor: pointer;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="card-title">Import & Export Data</h2>
+                <p class="card-text">Use this page to import or export job data in various formats.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Export Data</h5>
+            </div>
+            <div class="card-body">
+                <p>Export your job data in various formats for backup or analysis.</p>
+
+                <form id="export-form" class="mb-3">
+                    <div class="mb-3">
+                        <label for="export-format" class="form-label">Format</label>
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <div class="card format-card selected" data-format="json">
+                                    <div class="card-body text-center">
+                                        <i class="bi bi-filetype-json format-icon json-icon"></i>
+                                        <h6>JSON</h6>
+                                        <small class="text-muted">Best for full data</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card format-card" data-format="csv">
+                                    <div class="card-body text-center">
+                                        <i class="bi bi-filetype-csv format-icon csv-icon"></i>
+                                        <h6>CSV</h6>
+                                        <small class="text-muted">Best for analysis</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card format-card" data-format="sql">
+                                    <div class="card-body text-center">
+                                        <i class="bi bi-filetype-sql format-icon sql-icon"></i>
+                                        <h6>SQL</h6>
+                                        <small class="text-muted">Best for backup</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <input type="hidden" id="export-format" value="json">
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="button" id="export-btn" class="btn btn-primary">
+                            <i class="bi bi-download"></i> Export Data
+                        </button>
+                    </div>
+                </form>
+
+                <div id="export-result" class="alert alert-success d-none">
+                    <p id="export-message"></p>
+                    <div id="export-download" class="d-none">
+                        <a href="#" class="btn btn-sm btn-outline-primary" id="download-link">
+                            <i class="bi bi-file-earmark-arrow-down"></i> Download File
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Import Data</h5>
+            </div>
+            <div class="card-body">
+                <p>Import job data from previously exported files.</p>
+
+                <form id="import-form" enctype="multipart/form-data" class="mb-3">
+                    <div class="mb-3">
+                        <label for="import-file" class="form-label">File</label>
+                        <div class="upload-box" id="upload-box">
+                            <i class="bi bi-cloud-arrow-up upload-icon"></i>
+                            <h6>Drag and drop your file here</h6>
+                            <p class="text-muted">or</p>
+                            <input type="file" id="import-file" class="form-control" accept=".json,.csv,.sql">
+                            <div class="form-text mt-2">Supported formats: JSON, CSV, SQL</div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="update-existing" checked>
+                            <label class="form-check-label" for="update-existing">
+                                Update existing records
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="button" id="import-btn" class="btn btn-primary">
+                            <i class="bi bi-upload"></i> Import Data
+                        </button>
+                    </div>
+                </form>
+
+                <div id="import-result" class="alert alert-success d-none">
+                    <h6>Import Results</h6>
+                    <p id="import-message"></p>
+                    <div id="import-stats" class="d-none">
+                        <ul>
+                            <li>Records read: <span id="records-read">0</span></li>
+                            <li>Records imported: <span id="records-imported">0</span></li>
+                            <li>Errors: <span id="import-errors">0</span></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <h5 class="mb-0">Recent Exports</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Filename</th>
+                                <th>Date</th>
+                                <th>Size</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="exports-table-body">
+                            <tr>
+                                <td colspan="4" class="text-center">No recent exports</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Format card selection
+        const formatCards = document.querySelectorAll('.format-card');
+        formatCards.forEach(card => {
+            card.addEventListener('click', function () {
+                // Remove selected class from all cards
+                formatCards.forEach(c => c.classList.remove('selected'));
+                // Add selected class to clicked card
+                this.classList.add('selected');
+                // Update hidden input value
+                document.getElementById('export-format').value = this.dataset.format;
+            });
+        });
+
+        // Drag and drop for file upload
+        const uploadBox = document.getElementById('upload-box');
+        const fileInput = document.getElementById('import-file');
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadBox.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadBox.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadBox.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight() {
+            uploadBox.classList.add('dragover');
+        }
+
+        function unhighlight() {
+            uploadBox.classList.remove('dragover');
+        }
+
+        uploadBox.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            fileInput.files = files;
+
+            // Update the file name display
+            if (files.length > 0) {
+                const fileName = files[0].name;
+                const fileSize = formatFileSize(files[0].size);
+                const uploadIcon = uploadBox.querySelector('.upload-icon');
+                const heading = uploadBox.querySelector('h6');
+
+                uploadIcon.classList.remove('bi-cloud-arrow-up');
+                uploadIcon.classList.add('bi-file-earmark-check');
+                heading.innerHTML = `Selected: <strong>${fileName}</strong> (${fileSize})`;
+            }
+        }
+
+        // Update file name when selected via browse
+        fileInput.addEventListener('change', function () {
+            if (this.files.length > 0) {
+                const fileName = this.files[0].name;
+                const fileSize = formatFileSize(this.files[0].size);
+                const uploadIcon = uploadBox.querySelector('.upload-icon');
+                const heading = uploadBox.querySelector('h6');
+
+                uploadIcon.classList.remove('bi-cloud-arrow-up');
+                uploadIcon.classList.add('bi-file-earmark-check');
+                heading.innerHTML = `Selected: <strong>${fileName}</strong> (${fileSize})`;
+            }
+        });
+
+        // Export button
+        const exportBtn = document.getElementById('export-btn');
+        exportBtn.addEventListener('click', function () {
+            exportData();
+        });
+
+        // Import button
+        const importBtn = document.getElementById('import-btn');
+        importBtn.addEventListener('click', function () {
+            importData();
+        });
+
+        // Load recent exports
+        loadRecentExports();
+    });
+
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    function loadRecentExports() {
+        // This would typically fetch from the server, but for now we'll mock it
+        setTimeout(() => {
+            const mockExports = [
+                { filename: 'job_export_20240325_123456.json', date: '2024-03-25 12:34:56', size: '42 KB' },
+                { filename: 'job_export_20240324_112233.csv', date: '2024-03-24 11:22:33', size: '38 KB' }
+            ];
+
+            const tableBody = document.getElementById('exports-table-body');
+            if (mockExports.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="4" class="text-center">No recent exports</td></tr>';
+                return;
+            }
+
+            tableBody.innerHTML = '';
+            mockExports.forEach(exp => {
+                tableBody.innerHTML += `
+                    <tr>
+                        <td>${exp.filename}</td>
+                        <td>${exp.date}</td>
+                        <td>${exp.size}</td>
+                        <td>
+                            <a href="/uploads/${exp.filename}" class="btn btn-sm btn-outline-primary me-1" download>
+                                <i class="bi bi-download"></i>
+                            </a>
+                            <button class="btn btn-sm btn-outline-danger">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+        }, 500);
+    }
+
+    function exportData() {
+        // Get format
+        const format = document.getElementById('export-format').value;
+
+        // Disable the button and show loading
+        const exportBtn = document.getElementById('export-btn');
+        exportBtn.disabled = true;
+        exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Exporting...';
+
+        // Clear previous results
+        document.getElementById('export-result').classList.add('d-none');
+
+        // Call API to export data
+        fetch('/api/export-db', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                format: format
+            })
+        })
+            .then(response => response.json())
+            .then(data => {
+                // Re-enable the button
+                exportBtn.disabled = false;
+                exportBtn.innerHTML = '<i class="bi bi-download"></i> Export Data';
+
+                // Show results
+                const exportResult = document.getElementById('export-result');
+                const exportMessage = document.getElementById('export-message');
+                const exportDownload = document.getElementById('export-download');
+                const downloadLink = document.getElementById('download-link');
+
+                exportResult.classList.remove('d-none');
+
+                if (data.success) {
+                    exportResult.classList.remove('alert-danger');
+                    exportResult.classList.add('alert-success');
+                    exportMessage.textContent = data.message;
+
+                    // Set up download link if file was exported
+                    if (data.file) {
+                        exportDownload.classList.remove('d-none');
+                        downloadLink.href = '/uploads/' + data.file;
+                        downloadLink.download = data.file;
+
+                        // Refresh recent exports
+                        setTimeout(loadRecentExports, 500);
+                    } else {
+                        exportDownload.classList.add('d-none');
+                    }
+                } else {
+                    exportResult.classList.remove('alert-success');
+                    exportResult.classList.add('alert-danger');
+                    exportMessage.textContent = data.message || 'An error occurred during export';
+                    exportDownload.classList.add('d-none');
+                }
+            })
+            .catch(error => {
+                // Re-enable the button
+                exportBtn.disabled = false;
+                exportBtn.innerHTML = '<i class="bi bi-download"></i> Export Data';
+
+                // Show error
+                const exportResult = document.getElementById('export-result');
+                const exportMessage = document.getElementById('export-message');
+                exportResult.classList.remove('d-none', 'alert-success');
+                exportResult.classList.add('alert-danger');
+                exportMessage.textContent = 'Error: ' + error.message;
+
+                console.error('Error exporting data:', error);
+            });
+    }
+
+    function importData() {
+        // Get file
+        const fileInput = document.getElementById('import-file');
+        if (!fileInput.files || fileInput.files.length === 0) {
+            alert('Please select a file to import');
+            return;
+        }
+
+        const file = fileInput.files[0];
+        const updateExisting = document.getElementById('update-existing').checked;
+
+        // Create form data
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('update_existing', updateExisting);
+
+        // Disable the button and show loading
+        const importBtn = document.getElementById('import-btn');
+        importBtn.disabled = true;
+        importBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Importing...';
+
+        // Clear previous results
+        document.getElementById('import-result').classList.add('d-none');
+
+        // Call API to import data
+        fetch('/api/import-db', {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => response.json())
+            .then(data => {
+                // Re-enable the button
+                importBtn.disabled = false;
+                importBtn.innerHTML = '<i class="bi bi-upload"></i> Import Data';
+
+                // Show results
+                const importResult = document.getElementById('import-result');
+                const importMessage = document.getElementById('import-message');
+                const importStats = document.getElementById('import-stats');
+
+                importResult.classList.remove('d-none');
+
+                if (data.success) {
+                    importResult.classList.remove('alert-danger');
+                    importResult.classList.add('alert-success');
+                    importMessage.textContent = data.message;
+
+                    // Display stats if available
+                    if (data.stats) {
+                        importStats.classList.remove('d-none');
+                        document.getElementById('records-read').textContent = data.stats.records_read || 0;
+                        document.getElementById('records-imported').textContent = data.stats.records_imported || 0;
+                        document.getElementById('import-errors').textContent = data.stats.errors || 0;
+                    } else {
+                        importStats.classList.add('d-none');
+                    }
+
+                    // Reset file input
+                    fileInput.value = '';
+                    const uploadIcon = document.querySelector('.upload-icon');
+                    const heading = document.querySelector('#upload-box h6');
+
+                    uploadIcon.classList.remove('bi-file-earmark-check');
+                    uploadIcon.classList.add('bi-cloud-arrow-up');
+                    heading.textContent = 'Drag and drop your file here';
+                } else {
+                    importResult.classList.remove('alert-success');
+                    importResult.classList.add('alert-danger');
+                    importMessage.textContent = data.message || 'An error occurred during import';
+                    importStats.classList.add('d-none');
+                }
+            })
+            .catch(error => {
+                // Re-enable the button
+                importBtn.disabled = false;
+                importBtn.innerHTML = '<i class="bi bi-upload"></i> Import Data';
+
+                // Show error
+                const importResult = document.getElementById('import-result');
+                const importMessage = document.getElementById('import-message');
+                importResult.classList.remove('d-none', 'alert-success');
+                importResult.classList.add('alert-danger');
+                importMessage.textContent = 'Error: ' + error.message;
+
+                console.error('Error importing data:', error);
+            });
+    }
+</script>
+{% endblock %}
