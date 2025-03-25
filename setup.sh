@@ -903,8 +903,8 @@ setup_superset() {
     log "INFO" "Installing Apache Superset dependencies"
     
     # Install required system packages for Superset
-    local superset_deps="build-essential libssl-dev libffi-dev python3-dev python3-pip libsasl2-dev libldap2-dev default-libmysqlclient-dev"
-    apt-get install -y -qq $superset_deps || {
+    local superset_deps=(build-essential libssl-dev libffi-dev python3-dev python3-pip libsasl2-dev libldap2-dev default-libmysqlclient-dev)
+    apt-get install -y -qq "${superset_deps[@]}" || {
         log "ERROR" "Failed to install Superset dependencies"
         exit 1
     }
