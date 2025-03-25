@@ -608,7 +608,7 @@ EOF
             log "ERROR" "Email not provided, cannot set up SSL"
             log "INFO" "Please set EMAIL and run this script again"
             exit 1
-        }
+        fi
         
         certbot --nginx -d "$DOMAIN_NAME" --non-interactive --agree-tos -m "$EMAIL" || {
             log "WARNING" "Failed to obtain SSL certificate"
@@ -1152,7 +1152,7 @@ EOF
                 log "ERROR" "Email not provided, cannot set up SSL"
                 log "INFO" "Please set EMAIL and run this script again"
                 exit 1
-            }
+            fi
             
             certbot --nginx -d "superset.$DOMAIN_NAME" --non-interactive --agree-tos -m "$EMAIL" || {
                 log "WARNING" "Failed to obtain SSL certificate for Superset"
