@@ -38,11 +38,6 @@ DB_PORT=${DB_PORT:-5432}
 REDIS_HOST=${REDIS_HOST:-"localhost"}
 REDIS_PORT=${REDIS_PORT:-6379}
 LOG_LEVEL=${LOG_LEVEL:-"INFO"}
-USE_SUPERSET=${USE_SUPERSET:-"true"}
-SUPERSET_PORT=${SUPERSET_PORT:-8088}
-SUPERSET_USER=${SUPERSET_USER:-"admin"}
-SUPERSET_PASSWORD=${SUPERSET_PASSWORD:-"$(openssl rand -hex 8)"}
-SUPERSET_HOME=${SUPERSET_HOME:-"/opt/superset"}
 
 # ===== Helper Functions =====
 
@@ -323,6 +318,7 @@ setup_application_user() {
     mkdir -p "$APP_HOME/uploads"
     mkdir -p "$APP_HOME/static"
     mkdir -p "$APP_HOME/config"
+    mkdir -p "$APP_HOME/scripts"
     
     # Set ownership and permissions
     log "INFO" "Setting ownership and permissions"
@@ -372,6 +368,12 @@ setup_virtualenv() {
     log "INFO" "Installing Python dependencies"
     su - "$APP_USER" -c "cd $APP_HOME && source venv/bin/activate && pip install --upgrade pip && pip install wheel && pip install -r requirements.txt" || {
         log "ERROR" "Failed to install Python dependencies"
+        exit 1
+    }
+    
+    # Install gunicorn for production
+    su - "$APP_USER" -c "cd $APP_HOME && source venv/bin/activate && pip install gunicorn" || {
+        log "ERROR" "Failed to install Gunicorn"
         exit 1
     }
     
@@ -471,7 +473,7 @@ setup_database() {
         log "INFO" "Database $DB_NAME already exists"
     fi
     
-    # Initialize database tables by running database migrations
+    # Initialize database tables
     log "INFO" "Initializing database"
     if [ -f "$APP_HOME/app/db/init_db.py" ]; then
         su - "$APP_USER" -c "cd $APP_HOME && source venv/bin/activate && python3 -m app.db.init_db" || {
@@ -880,494 +882,6 @@ verify_installation() {
     fi
 }
 
-# Set up Apache Superset
-setup_superset() {
-    section "Setting Up Apache Superset"
-    
-    if [[ "$USE_SUPERSET" != "true" ]]; then
-        log "INFO" "Superset setup skipped as per configuration"
-        return 0
-    fi
-    
-    if [[ "$USE_DOCKER" == "true" ]]; then
-        setup_superset_docker
-        return 0
-    fi
-    
-    log "INFO" "Installing Apache Superset dependencies"
-    
-    # Install required system packages for Superset
-    local superset_deps="build-essential libssl-dev libffi-dev python3-dev python3-pip libsasl2-dev libldap2-dev default-libmysqlclient-dev"
-    apt-get install -y -qq $superset_deps || {
-        log "ERROR" "Failed to install Superset dependencies"
-        exit 1
-    }
-    
-    # Create Superset user if different from application user
-    if [[ "$APP_USER" != "superset" ]]; then
-        if ! id -u "superset" >/dev/null 2>&1; then
-            log "INFO" "Creating dedicated Superset user"
-            useradd -m -s /bin/bash -d "$SUPERSET_HOME" "superset" || {
-                log "ERROR" "Failed to create Superset user"
-                exit 1
-            }
-        else
-            log "INFO" "Superset user already exists"
-        fi
-    else
-        log "INFO" "Using application user for Superset"
-    fi
-    
-    # Create Superset directories
-    log "INFO" "Creating Superset directories"
-    mkdir -p "$SUPERSET_HOME"
-    mkdir -p "$SUPERSET_HOME/logs"
-    mkdir -p "$SUPERSET_HOME/config"
-    
-    # Set ownership and permissions
-    log "INFO" "Setting ownership and permissions for Superset"
-    chown -R superset:superset "$SUPERSET_HOME"
-    chmod -R 750 "$SUPERSET_HOME"
-    
-    # Install Superset in a virtual environment
-    log "INFO" "Creating Superset virtual environment"
-    su - superset -c "cd $SUPERSET_HOME && python3 -m venv venv" || {
-        log "ERROR" "Failed to create Superset virtual environment"
-        exit 1
-    }
-    
-    log "INFO" "Installing Apache Superset"
-    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && pip install --upgrade pip && pip install apache-superset psycopg2-binary" || {
-        log "ERROR" "Failed to install Apache Superset"
-        exit 1
-    }
-    
-    # Initialize Superset database
-    log "INFO" "Initializing Superset database"
-    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && superset db upgrade" || {
-        log "ERROR" "Failed to initialize Superset database"
-        exit 1
-    }
-    
-    # Create admin user
-    log "INFO" "Creating Superset admin user"
-    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && export FLASK_APP=superset && \
-        superset fab create-admin \
-            --username $SUPERSET_USER \
-            --firstname Admin \
-            --lastname User \
-            --email $EMAIL \
-            --password $SUPERSET_PASSWORD" || {
-        log "ERROR" "Failed to create Superset admin user"
-        exit 1
-    }
-    
-    # Load examples and initialize roles
-    log "INFO" "Setting up Superset initial configuration"
-    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && superset init" || {
-        log "WARNING" "Failed to initialize Superset examples"
-    }
-    
-    # Configure Superset to connect to the Job Scraper database
-    log "INFO" "Configuring Superset to connect to Job Scraper database"
-    
-    # Create a configuration script
-    cat > "$SUPERSET_HOME/config/superset_config.py" << EOF
-import os
-
-# Superset specific configuration
-SUPERSET_WEBSERVER_PORT = ${SUPERSET_PORT}
-SUPERSET_WEBSERVER_TIMEOUT = 300
-SECRET_KEY = '$(openssl rand -hex 32)'
-
-# Flask App Builder configuration
-APP_NAME = "Job Scraper Analytics"
-APP_ICON = "/static/assets/images/superset-logo-horiz.png"
-FAVICON = "/static/assets/images/favicon.png"
-
-# Database connection to Job Scraper database
-SQLALCHEMY_CUSTOM_PASSWORD_STORE = {}
-SQLALCHEMY_CUSTOM_PASSWORD_STORE['jobsdb'] = '${DB_PASSWORD}'
-
-# Example of a database connection
-SQLALCHEMY_DATABASE_URI = 'sqlite:///${SUPERSET_HOME}/superset.db'
-
-# Add job scraper database connection string
-ADDITIONAL_DATABASE_URI = 'postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}'
-EOF
-    
-    chown superset:superset "$SUPERSET_HOME/config/superset_config.py"
-    chmod 640 "$SUPERSET_HOME/config/superset_config.py"
-    
-    # Create a script to add the database connection
-    cat > "$SUPERSET_HOME/scripts/add_jobsdb.py" << 'EOF'
-#!/usr/bin/env python3
-from superset import db
-from superset.models.core import Database
-import os
-
-# Get database connection string from environment
-conn_string = os.environ.get('DB_CONNECTION_STRING')
-db_name = os.environ.get('DB_NAME', 'Job Scraper DB')
-db_description = "Job Scraper Database with scraped job listings"
-
-# Check if the database already exists
-existing_db = db.session.query(Database).filter_by(database_name=db_name).first()
-
-if not existing_db:
-    # Create a new database entry
-    new_db = Database(
-        database_name=db_name,
-        sqlalchemy_uri=conn_string,
-        cache_timeout=None,
-        expose_in_sqllab=True,
-        allow_csv_upload=False,
-        allow_ctas=True,
-        allow_cvas=True,
-        allow_dml=False,
-        allow_multi_schema_metadata_fetch=True,
-        description=db_description
-    )
-    db.session.add(new_db)
-    db.session.commit()
-    print(f"Added database connection: {db_name}")
-else:
-    # Update existing database
-    existing_db.sqlalchemy_uri = conn_string
-    existing_db.description = db_description
-    db.session.commit()
-    print(f"Updated database connection: {db_name}")
-EOF
-    
-    chmod +x "$SUPERSET_HOME/scripts/add_jobsdb.py"
-    chown superset:superset "$SUPERSET_HOME/scripts/add_jobsdb.py"
-    
-    # Execute the script to add the database connection
-    log "INFO" "Adding Job Scraper database to Superset"
-    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && \
-        export PYTHONPATH=$SUPERSET_HOME:$PYTHONPATH && \
-        export FLASK_APP=superset && \
-        export DB_CONNECTION_STRING='postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}' && \
-        export DB_NAME='Job Scraper DB' && \
-        python3 $SUPERSET_HOME/scripts/add_jobsdb.py" || {
-        log "WARNING" "Failed to add database connection to Superset"
-    }
-    
-    # Create a systemd service for Superset
-    log "INFO" "Creating systemd service for Superset"
-    
-    cat > "/etc/systemd/system/superset.service" << EOF
-[Unit]
-Description=Apache Superset
-After=network.target postgresql.service redis-server.service
-Wants=postgresql.service redis-server.service
-
-[Service]
-User=superset
-Group=superset
-WorkingDirectory=$SUPERSET_HOME
-Environment=PYTHONPATH=$SUPERSET_HOME
-Environment=SUPERSET_CONFIG_PATH=$SUPERSET_HOME/config/superset_config.py
-ExecStart=$SUPERSET_HOME/venv/bin/gunicorn -w 8 --timeout 120 -b 0.0.0.0:$SUPERSET_PORT --limit-request-line 0 --limit-request-field_size 0 "superset.app:create_app()"
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    # Reload systemd
-    systemctl daemon-reload || {
-        log "ERROR" "Failed to reload systemd"
-        exit 1
-    }
-    
-    # Enable and start the service
-    systemctl enable superset.service || {
-        log "ERROR" "Failed to enable Superset service"
-        exit 1
-    }
-    
-    systemctl start superset.service || {
-        log "ERROR" "Failed to start Superset service"
-        exit 1
-    }
-    
-    # Configure Nginx for Superset if Nginx is used
-    if [[ "$USE_NGINX" == "true" ]]; then
-        log "INFO" "Configuring Nginx for Superset"
-        
-        cat > "/etc/nginx/sites-available/superset" << EOF
-server {
-    listen 80;
-    server_name superset.$DOMAIN_NAME;
-
-    location / {
-        proxy_pass http://127.0.0.1:$SUPERSET_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    client_max_body_size 100M;
-
-    # Security headers
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-}
-EOF
-        
-        # Enable the site
-        ln -sf "/etc/nginx/sites-available/superset" "/etc/nginx/sites-enabled/" || {
-            log "ERROR" "Failed to enable Nginx configuration for Superset"
-            exit 1
-        }
-        
-        # Test Nginx configuration
-        nginx -t || {
-            log "ERROR" "Nginx configuration test failed"
-            exit 1
-        }
-        
-        # Restart Nginx
-        systemctl restart nginx || {
-            log "ERROR" "Failed to restart Nginx"
-            exit 1
-        }
-        
-        # Set up SSL for Superset subdomain if SSL is enabled
-        if [[ "$USE_SSL" == "true" ]]; then
-            log "INFO" "Setting up SSL for Superset with Let's Encrypt"
-            
-            if [ -z "$DOMAIN_NAME" ]; then
-                log "ERROR" "Domain name not provided, cannot set up SSL"
-                log "INFO" "Please set DOMAIN_NAME and run this script again"
-                exit 1
-            fi
-            
-            if [ -z "$EMAIL" ]; then
-                log "ERROR" "Email not provided, cannot set up SSL"
-                log "INFO" "Please set EMAIL and run this script again"
-                exit 1
-            }
-            
-            certbot --nginx -d "superset.$DOMAIN_NAME" --non-interactive --agree-tos -m "$EMAIL" || {
-                log "WARNING" "Failed to obtain SSL certificate for Superset"
-                log "INFO" "You can try again later with: certbot --nginx -d superset.$DOMAIN_NAME"
-            }
-        fi
-    fi
-    
-    log "SUCCESS" "Apache Superset set up successfully"
-    log "INFO" "Superset admin credentials:"
-    log "INFO" "Username: $SUPERSET_USER"
-    log "INFO" "Password: $SUPERSET_PASSWORD"
-    
-    # Store credentials in a secure file
-    if [[ ! -d "$APP_HOME/credentials" ]]; then
-        mkdir -p "$APP_HOME/credentials"
-        chmod 700 "$APP_HOME/credentials"
-        chown "$APP_USER:$APP_GROUP" "$APP_HOME/credentials"
-    fi
-    
-    cat > "$APP_HOME/credentials/superset_credentials.txt" << EOF
-Superset Admin Credentials
-------------------------
-URL: http://superset.$DOMAIN_NAME
-Username: $SUPERSET_USER
-Password: $SUPERSET_PASSWORD
-Created: $(date)
-
-Keep this information secure!
-EOF
-    
-    chmod 600 "$APP_HOME/credentials/superset_credentials.txt"
-    chown "$APP_USER:$APP_GROUP" "$APP_HOME/credentials/superset_credentials.txt"
-}
-
-# Set up Superset with Docker
-setup_superset_docker() {
-    log "INFO" "Setting up Apache Superset with Docker"
-    
-    # Create directory for Superset configuration
-    mkdir -p "$APP_HOME/docker/superset"
-    mkdir -p "$APP_HOME/docker/superset/config"
-    
-    # Create Superset configuration
-    cat > "$APP_HOME/docker/superset/config/superset_config.py" << EOF
-import os
-
-# Superset specific configuration
-SUPERSET_WEBSERVER_PORT = ${SUPERSET_PORT}
-SUPERSET_WEBSERVER_TIMEOUT = 300
-SECRET_KEY = '$(openssl rand -hex 32)'
-
-# Flask App Builder configuration
-APP_NAME = "Job Scraper Analytics"
-APP_ICON = "/static/assets/images/superset-logo-horiz.png"
-FAVICON = "/static/assets/images/favicon.png"
-
-# Job Scraper database connection
-SQLALCHEMY_CUSTOM_PASSWORD_STORE = {}
-SQLALCHEMY_CUSTOM_PASSWORD_STORE['jobsdb'] = '${DB_PASSWORD}'
-EOF
-    
-    # Create Docker Compose entry for Superset
-    cat > "$APP_HOME/docker/superset/docker-compose.yml" << EOF
-version: '3'
-services:
-  superset:
-    image: apache/superset:latest
-    container_name: superset
-    ports:
-      - "${SUPERSET_PORT}:8088"
-    environment:
-      - SUPERSET_SECRET_KEY=$(openssl rand -hex 32)
-      - ADMIN_USERNAME=${SUPERSET_USER}
-      - ADMIN_EMAIL=${EMAIL}
-      - ADMIN_PASSWORD=${SUPERSET_PASSWORD}
-    volumes:
-      - ${APP_HOME}/docker/superset/config/superset_config.py:/app/pythonpath/superset_config.py
-      - superset_home:/app/superset_home
-    restart: always
-    networks:
-      - job_scraper_network
-
-networks:
-  job_scraper_network:
-    external: true
-
-volumes:
-  superset_home:
-EOF
-    
-    # Create initialization script
-    cat > "$APP_HOME/docker/superset/init.sh" << 'EOF'
-#!/bin/bash
-set -e
-
-# Wait for Superset to be ready
-echo "Waiting for Superset to be ready..."
-sleep 10
-
-# Initialize Superset database
-docker exec -it superset superset db upgrade
-
-# Create admin user if not exists
-docker exec -it superset superset fab create-admin \
-    --username "$ADMIN_USERNAME" \
-    --firstname Admin \
-    --lastname User \
-    --email "$ADMIN_EMAIL" \
-    --password "$ADMIN_PASSWORD"
-
-# Initialize Superset roles and examples
-docker exec -it superset superset init
-
-# Add Job Scraper database to Superset
-docker exec -it superset superset set-database-uri \
-    --database-name "Job Scraper DB" \
-    --uri "postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME" \
-    --expose-in-sqllab \
-    --allow-run-async \
-    --allow-ctas \
-    --allow-cvas \
-    --allow-dml
-
-echo "Superset initialization completed!"
-EOF
-    
-    chmod +x "$APP_HOME/docker/superset/init.sh"
-    
-    log "INFO" "Starting Superset container"
-    cd "$APP_HOME/docker/superset" && docker-compose up -d || {
-        log "ERROR" "Failed to start Superset container"
-        exit 1
-    }
-    
-    # Run initialization script
-    log "INFO" "Initializing Superset"
-    source "$APP_HOME/docker/superset/init.sh" || {
-        log "WARNING" "Failed to initialize Superset"
-        log "INFO" "You can manually initialize it later with: $APP_HOME/docker/superset/init.sh"
-    }
-    
-    # Configure Nginx for Superset if Nginx is used
-    if [[ "$USE_NGINX" == "true" ]]; then
-        log "INFO" "Configuring Nginx for Superset"
-        
-        cat > "/etc/nginx/sites-available/superset" << EOF
-server {
-    listen 80;
-    server_name superset.$DOMAIN_NAME;
-
-    location / {
-        proxy_pass http://127.0.0.1:$SUPERSET_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    client_max_body_size 100M;
-
-    # Security headers
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-}
-EOF
-        
-        # Enable the site
-        ln -sf "/etc/nginx/sites-available/superset" "/etc/nginx/sites-enabled/" || {
-            log "ERROR" "Failed to enable Nginx configuration for Superset"
-            exit 1
-        }
-        
-        # Test Nginx configuration
-        nginx -t || {
-            log "ERROR" "Nginx configuration test failed"
-            exit 1
-        }
-        
-        # Restart Nginx
-        systemctl restart nginx || {
-            log "ERROR" "Failed to restart Nginx"
-            exit 1
-        }
-    }
-    
-    log "SUCCESS" "Apache Superset (Docker) set up successfully"
-    log "INFO" "Superset admin credentials:"
-    log "INFO" "Username: $SUPERSET_USER"
-    log "INFO" "Password: $SUPERSET_PASSWORD"
-    
-    # Store credentials in a secure file
-    if [[ ! -d "$APP_HOME/credentials" ]]; then
-        mkdir -p "$APP_HOME/credentials"
-        chmod 700 "$APP_HOME/credentials"
-        chown "$APP_USER:$APP_GROUP" "$APP_HOME/credentials"
-    fi
-    
-    cat > "$APP_HOME/credentials/superset_credentials.txt" << EOF
-Superset Admin Credentials
-------------------------
-URL: http://superset.$DOMAIN_NAME
-Username: $SUPERSET_USER
-Password: $SUPERSET_PASSWORD
-Created: $(date)
-
-Keep this information secure!
-EOF
-    
-    chmod 600 "$APP_HOME/credentials/superset_credentials.txt"
-    chown "$APP_USER:$APP_GROUP" "$APP_HOME/credentials/superset_credentials.txt"
-}
-
 # Display summary
 display_summary() {
     section "Installation Summary"
@@ -1396,20 +910,6 @@ display_summary() {
         fi
     fi
     
-    # Add Superset information to summary
-    if [[ "$USE_SUPERSET" == "true" ]]; then
-        log "INFO" "Analytics: Apache Superset"
-        log "INFO" "Superset URL: http://superset.$DOMAIN_NAME"
-        log "INFO" "Superset credentials stored in: $APP_HOME/credentials/superset_credentials.txt"
-        
-        if [[ "$USE_DOCKER" == "true" ]]; then
-            log "INFO" "Superset deployment: Docker container"
-        else
-            log "INFO" "Superset service: superset.service"
-            log "INFO" "Superset home: $SUPERSET_HOME"
-        fi
-    fi
-    
     log "INFO" "Backups: Daily at 2 AM (stored in $APP_HOME/backups)"
     
     # Access URLs
@@ -1435,14 +935,6 @@ display_summary() {
         log "INFO" "Stop: systemctl stop $APP_NAME.service"
         log "INFO" "Restart: systemctl restart $APP_NAME.service"
         log "INFO" "Status: systemctl status $APP_NAME.service"
-    fi
-    
-    if [[ "$USE_SUPERSET" == "true" && "$USE_DOCKER" != "true" ]]; then
-        log "INFO" "Superset management:"
-        log "INFO" "Start: systemctl start superset.service"
-        log "INFO" "Stop: systemctl stop superset.service"
-        log "INFO" "Restart: systemctl restart superset.service"
-        log "INFO" "Status: systemctl status superset.service"
     fi
     
     log "INFO" "Logs: $APP_HOME/logs/"
@@ -1484,7 +976,6 @@ setup_redis
 setup_nginx
 setup_systemd_service
 setup_monitoring
-setup_superset
 setup_backups
 setup_security
 verify_installation
