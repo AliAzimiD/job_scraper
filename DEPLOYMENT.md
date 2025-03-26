@@ -34,6 +34,7 @@ Edit `deploy.conf` to configure your deployment:
 # Server settings
 SERVER_USER="your-username"     # Your SSH username on the VPS
 SERVER_HOST="your-server-ip"    # Your VPS IP or hostname
+SERVER_PASSWORD=""              # Optional: SSH password (leave empty to use SSH key authentication)
 REMOTE_PATH="/path/on/server"   # Path to install on the server
 
 # Repository settings

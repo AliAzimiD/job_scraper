@@ -89,9 +89,7 @@ if ! command -v docker &> /dev/null; then
 fi
 
 # Create deployment directory if it doesn't exist
-if [ ! -d "$REMOTE_PATH" ]; then
-    mkdir -p "$REMOTE_PATH"
-fi
+mkdir -p "$REMOTE_PATH"
 
 echo "Server preparation completed"
 EOF
@@ -118,6 +116,8 @@ export USE_SSL="$USE_SSL"
 export EMAIL="$EMAIL"
 export USE_SUPERSET="$USE_SUPERSET"
 export SUPERSET_DOMAIN="$SUPERSET_DOMAIN"
+export SUPERSET_USER="$SUPERSET_USER"
+export SUPERSET_PASSWORD="$SUPERSET_PASSWORD"
 export DB_USER="$DB_USER"
 export DB_NAME="$DB_NAME"
 EOF
@@ -168,49 +168,111 @@ deploy() {
     log "INFO" "Creating deployment package"
     tar -czf deploy_package.tar.gz *.sh deploy.conf
     
-    # Upload to server
-    log "INFO" "Uploading deployment package to server"
-    scp deploy_package.tar.gz "$SERVER_USER@$SERVER_HOST:~/"
-    
-    # Execute deployment on server
-    log "INFO" "Executing deployment on server"
-    ssh -t "$SERVER_USER@$SERVER_HOST" "
-        # Extract deployment package
-        mkdir -p ~/deploy_tmp
-        tar -xzf ~/deploy_package.tar.gz -C ~/deploy_tmp
-        cd ~/deploy_tmp
+    # Check if sshpass is needed and installed
+    if [ -n "$SERVER_PASSWORD" ]; then
+        if ! command -v sshpass &> /dev/null; then
+            log "WARNING" "Password authentication requested but sshpass is not installed"
+            log "INFO" "Installing sshpass..."
+            apt-get update && apt-get install -y sshpass || {
+                log "ERROR" "Failed to install sshpass. Please install it manually or use SSH key authentication."
+                exit 1
+            }
+        fi
         
-        # Run server setup
-        ./server_setup.sh
+        # Upload to server using password
+        log "INFO" "Uploading deployment package to server using password authentication"
+        sshpass -p "$SERVER_PASSWORD" scp deploy_package.tar.gz "$SERVER_USER@$SERVER_HOST:~/"
         
-        # If uninstall flag was specified, run uninstallation first
-        if [ \"$DO_UNINSTALL\" = true ]; then
-            if [ -d \"$REMOTE_PATH\" ]; then
-                cd \"$REMOTE_PATH\"
-                sudo ./setup.sh --uninstall
+        # Execute deployment on server using password
+        log "INFO" "Executing deployment on server"
+        sshpass -p "$SERVER_PASSWORD" ssh -t "$SERVER_USER@$SERVER_HOST" "
+            # Extract deployment package
+            mkdir -p ~/deploy_tmp
+            tar -xzf ~/deploy_package.tar.gz -C ~/deploy_tmp
+            cd ~/deploy_tmp
+            
+            # Source the configuration to get REMOTE_PATH
+            source deploy.conf
+            
+            # Run server setup with REMOTE_PATH
+            REMOTE_PATH=\"$REMOTE_PATH\" ./server_setup.sh
+            
+            # If uninstall flag was specified, run uninstallation first
+            if [ \"$DO_UNINSTALL\" = true ]; then
+                if [ -d \"$REMOTE_PATH\" ]; then
+                    cd \"$REMOTE_PATH\"
+                    sudo ./setup.sh --uninstall
+                fi
             fi
-        fi
+            
+            # Clone fresh repository
+            sudo rm -rf \"$REMOTE_PATH\"
+            git clone -b \"$REPO_BRANCH\" \"$REPO_URL\" \"$REMOTE_PATH\"
+            cd \"$REMOTE_PATH\"
+            
+            # Source the answers file to pre-set environment variables
+            source ~/deploy_tmp/setup_answers.sh
+            
+            # Run setup script
+            if [ \"$DO_VERIFY\" = true ]; then
+                sudo -E ./setup.sh
+            else
+                sudo -E ./setup.sh --no-verify
+            fi
+            
+            # Clean up
+            cd ~
+            rm -rf ~/deploy_tmp
+            rm deploy_package.tar.gz
+        "
+    else
+        # Upload to server using SSH key
+        log "INFO" "Uploading deployment package to server using SSH key authentication"
+        scp deploy_package.tar.gz "$SERVER_USER@$SERVER_HOST:~/"
         
-        # Clone fresh repository
-        sudo rm -rf \"$REMOTE_PATH\"
-        git clone -b \"$REPO_BRANCH\" \"$REPO_URL\" \"$REMOTE_PATH\"
-        cd \"$REMOTE_PATH\"
-        
-        # Source the answers file to pre-set environment variables
-        source ~/deploy_tmp/setup_answers.sh
-        
-        # Run setup script
-        if [ \"$DO_VERIFY\" = true ]; then
-            sudo -E ./setup.sh
-        else
-            sudo -E ./setup.sh --no-verify
-        fi
-        
-        # Clean up
-        cd ~
-        rm -rf ~/deploy_tmp
-        rm deploy_package.tar.gz
-    "
+        # Execute deployment on server using SSH key
+        log "INFO" "Executing deployment on server"
+        ssh -t "$SERVER_USER@$SERVER_HOST" "
+            # Extract deployment package
+            mkdir -p ~/deploy_tmp
+            tar -xzf ~/deploy_package.tar.gz -C ~/deploy_tmp
+            cd ~/deploy_tmp
+            
+            # Source the configuration to get REMOTE_PATH
+            source deploy.conf
+            
+            # Run server setup with REMOTE_PATH
+            REMOTE_PATH=\"$REMOTE_PATH\" ./server_setup.sh
+            
+            # If uninstall flag was specified, run uninstallation first
+            if [ \"$DO_UNINSTALL\" = true ]; then
+                if [ -d \"$REMOTE_PATH\" ]; then
+                    cd \"$REMOTE_PATH\"
+                    sudo ./setup.sh --uninstall
+                fi
+            fi
+            
+            # Clone fresh repository
+            sudo rm -rf \"$REMOTE_PATH\"
+            git clone -b \"$REPO_BRANCH\" \"$REPO_URL\" \"$REMOTE_PATH\"
+            cd \"$REMOTE_PATH\"
+            
+            # Source the answers file to pre-set environment variables
+            source ~/deploy_tmp/setup_answers.sh
+            
+            # Run setup script
+            if [ \"$DO_VERIFY\" = true ]; then
+                sudo -E ./setup.sh
+            else
+                sudo -E ./setup.sh --no-verify
+            fi
+            
+            # Clean up
+            cd ~
+            rm -rf ~/deploy_tmp
+            rm deploy_package.tar.gz
+        "
+    fi
     
     log "SUCCESS" "Deployment completed successfully!"
     log "INFO" "You can access your application at: http://$DOMAIN_NAME"
@@ -225,6 +287,24 @@ deploy() {
             log "INFO" "Secure Superset (SSL): https://$SUPERSET_DOMAIN"
         fi
     fi
+
+    # Add troubleshooting steps after successful deployment
+    log "INFO" "Running post-deployment checks..."
+    ssh -t "$SERVER_USER@$SERVER_HOST" "
+        echo \"Checking Nginx status...\"
+        systemctl status nginx || echo \"Nginx service not running properly\"
+        
+        echo \"Checking application service status...\"
+        systemctl status jobscraper || echo \"Application service not running properly\"
+        
+        echo \"Checking Nginx configuration...\"
+        nginx -t || echo \"Nginx configuration has errors\"
+        
+        echo \"Checking logs for errors...\"
+        tail -n 20 /var/log/nginx/error.log
+        
+        echo \"Post-deployment checks completed\"
+    "
 }
 
 # Create local test script
