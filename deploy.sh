@@ -110,7 +110,7 @@ EOF
     chmod +x server_setup.sh
 }
 
-# Create auto-answer file for setup.sh
+# Generate auto-answer file for setup.sh
 generate_answer_file() {
     log "INFO" "Generating automated answers file for setup.sh"
     
@@ -141,6 +141,24 @@ EOF
     fi
     
     chmod +x setup_answers.sh
+}
+
+# Add GitHub authentication helper
+setup_github_auth() {
+    log "INFO" "Setting up GitHub authentication for deployment"
+    
+    # Check if we already have credentials cached
+    GIT_CREDS_STATUS=$(git config --global credential.helper)
+    
+    if [ -z "$GIT_CREDS_STATUS" ]; then
+        log "INFO" "Configuring Git credential helper to cache credentials"
+        git config --global credential.helper 'cache --timeout=3600'
+        
+        log "INFO" "You'll be prompted for GitHub credentials during deployment"
+        log "INFO" "These will be cached temporarily and not stored in the repository"
+    else
+        log "INFO" "Git credential helper already configured: $GIT_CREDS_STATUS"
+    fi
 }
 
 # Test deployment using Docker
@@ -174,14 +192,8 @@ deploy() {
     check_config
     source "$CONFIG_FILE"
     
-    # Replace token placeholder in REPO_URL
-    if [ -n "$GITHUB_TOKEN" ]; then
-        REPO_URL="${REPO_URL/GITHUB_TOKEN/$GITHUB_TOKEN}"
-        log "INFO" "GitHub token applied to repository URL"
-    else
-        log "ERROR" "GitHub token not found in $LOCAL_CONFIG"
-        exit 1
-    fi
+    # Setup GitHub authentication
+    setup_github_auth
     
     # Generate the necessary files
     generate_server_setup
@@ -228,7 +240,10 @@ deploy() {
                 fi
             fi
             
-            # Clone fresh repository
+            # Setup Git credential helper on the server
+            git config --global credential.helper 'cache --timeout=3600'
+            
+            # Clone fresh repository (will prompt for credentials if needed)
             sudo rm -rf \"$REMOTE_PATH\"
             git clone -b \"$REPO_BRANCH\" \"$REPO_URL\" \"$REMOTE_PATH\"
             cd \"$REMOTE_PATH\"
@@ -275,7 +290,10 @@ deploy() {
                 fi
             fi
             
-            # Clone fresh repository
+            # Setup Git credential helper on the server
+            git config --global credential.helper 'cache --timeout=3600'
+            
+            # Clone fresh repository (will prompt for credentials if needed)
             sudo rm -rf \"$REMOTE_PATH\"
             git clone -b \"$REPO_BRANCH\" \"$REPO_URL\" \"$REMOTE_PATH\"
             cd \"$REMOTE_PATH\"
