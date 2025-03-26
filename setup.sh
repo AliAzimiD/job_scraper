@@ -950,41 +950,18 @@ setup_superset() {
     
     # Initialize Superset database
     log "INFO" "Initializing Superset database"
-    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && export FLASK_APP=superset && superset db upgrade" || {
-        log "ERROR" "Failed to initialize Superset database"
-        exit 1
-    }
-    
-    # Create admin user
-    log "INFO" "Creating Superset admin user"
-    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && export FLASK_APP=superset && \
-        superset fab create-admin \
-            --username $SUPERSET_USER \
-            --firstname Admin \
-            --lastname User \
-            --email $EMAIL \
-            --password $SUPERSET_PASSWORD" || {
-        log "ERROR" "Failed to create Superset admin user"
-        exit 1
-    }
-    
-    # Load examples and initialize roles
-    log "INFO" "Setting up Superset initial configuration"
-    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && export FLASK_APP=superset && superset init" || {
-        log "WARNING" "Failed to initialize Superset examples"
-    }
-    
-    # Configure Superset to connect to the Job Scraper database
-    log "INFO" "Configuring Superset to connect to Job Scraper database"
-    
-    # Create a configuration script
+
+    # Create a secure SECRET_KEY first
+    SUPERSET_SECRET_KEY=$(openssl rand -base64 42)
+
+    # Create Superset config with secure key
     cat > "$SUPERSET_HOME/config/superset_config.py" << EOF
 import os
 
 # Superset specific configuration
 SUPERSET_WEBSERVER_PORT = ${SUPERSET_PORT}
 SUPERSET_WEBSERVER_TIMEOUT = 300
-SECRET_KEY = '$(openssl rand -hex 32)'
+SECRET_KEY = '${SUPERSET_SECRET_KEY}'
 
 # Flask App Builder configuration
 APP_NAME = "Job Scraper Analytics"
@@ -1001,10 +978,43 @@ SQLALCHEMY_DATABASE_URI = 'sqlite:///${SUPERSET_HOME}/superset.db'
 # Add job scraper database connection string
 ADDITIONAL_DATABASE_URI = 'postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}'
 EOF
-    
+
     chown superset:superset "$SUPERSET_HOME/config/superset_config.py"
     chmod 640 "$SUPERSET_HOME/config/superset_config.py"
-    
+
+    # Run database initialization with config path set
+    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && \
+        export FLASK_APP=superset && \
+        export SUPERSET_CONFIG_PATH=$SUPERSET_HOME/config/superset_config.py && \
+        superset db upgrade" || {
+        log "ERROR" "Failed to initialize Superset database"
+        exit 1
+    }
+
+    # Create admin user
+    log "INFO" "Creating Superset admin user"
+    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && \
+        export FLASK_APP=superset && \
+        export SUPERSET_CONFIG_PATH=$SUPERSET_HOME/config/superset_config.py && \
+        superset fab create-admin \
+            --username $SUPERSET_USER \
+            --firstname Admin \
+            --lastname User \
+            --email $EMAIL \
+            --password $SUPERSET_PASSWORD" || {
+        log "ERROR" "Failed to create Superset admin user"
+        exit 1
+    }
+
+    # Load examples and initialize roles
+    log "INFO" "Setting up Superset initial configuration"
+    su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && \
+        export FLASK_APP=superset && \
+        export SUPERSET_CONFIG_PATH=$SUPERSET_HOME/config/superset_config.py && \
+        superset init" || {
+        log "WARNING" "Failed to initialize Superset examples"
+    }
+
     # Create a script to add the database connection
     cat > "$SUPERSET_HOME/scripts/add_jobsdb.py" << 'EOF'
 #!/usr/bin/env python3
@@ -1044,7 +1054,7 @@ else:
     db.session.commit()
     print(f"Updated database connection: {db_name}")
 EOF
-    
+
     chmod +x "$SUPERSET_HOME/scripts/add_jobsdb.py"
     chown superset:superset "$SUPERSET_HOME/scripts/add_jobsdb.py"
     
@@ -1053,12 +1063,13 @@ EOF
     su - superset -c "cd $SUPERSET_HOME && source venv/bin/activate && \
         export PYTHONPATH=$SUPERSET_HOME:$PYTHONPATH && \
         export FLASK_APP=superset && \
+        export SUPERSET_CONFIG_PATH=$SUPERSET_HOME/config/superset_config.py && \
         export DB_CONNECTION_STRING='postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}' && \
         export DB_NAME='Job Scraper DB' && \
         python3 $SUPERSET_HOME/scripts/add_jobsdb.py" || {
         log "WARNING" "Failed to add database connection to Superset"
     }
-    
+
     # Create a systemd service for Superset
     log "INFO" "Creating systemd service for Superset"
     
@@ -1202,19 +1213,25 @@ setup_superset_docker() {
     mkdir -p "$APP_HOME/docker/superset"
     mkdir -p "$APP_HOME/docker/superset/config"
     
-    # Create Superset configuration
+    # Create a secure random key for Superset
+    SUPERSET_DOCKER_SECRET_KEY=$(openssl rand -base64 42)
+
+    # Create Superset configuration for Docker
     cat > "$APP_HOME/docker/superset/config/superset_config.py" << EOF
 import os
 
 # Superset specific configuration
-SUPERSET_WEBSERVER_PORT = ${SUPERSET_PORT}
+SUPERSET_WEBSERVER_PORT = 8088
 SUPERSET_WEBSERVER_TIMEOUT = 300
-SECRET_KEY = '$(openssl rand -hex 32)'
+SECRET_KEY = '${SUPERSET_DOCKER_SECRET_KEY}'
 
 # Flask App Builder configuration
 APP_NAME = "Job Scraper Analytics"
 APP_ICON = "/static/assets/images/superset-logo-horiz.png"
 FAVICON = "/static/assets/images/favicon.png"
+
+# Database configuration
+SQLALCHEMY_DATABASE_URI = 'sqlite:////app/superset_home/superset.db'
 
 # Job Scraper database connection
 SQLALCHEMY_CUSTOM_PASSWORD_STORE = {}
@@ -1231,7 +1248,7 @@ services:
     ports:
       - "${SUPERSET_PORT}:8088"
     environment:
-      - SUPERSET_SECRET_KEY=$(openssl rand -hex 32)
+      - SUPERSET_SECRET_KEY=${SUPERSET_DOCKER_SECRET_KEY}
       - ADMIN_USERNAME=${SUPERSET_USER}
       - ADMIN_EMAIL=${EMAIL}
       - ADMIN_PASSWORD=${SUPERSET_PASSWORD}
@@ -1259,11 +1276,11 @@ set -e
 echo "Waiting for Superset to be ready..."
 sleep 10
 
-# Initialize Superset database
-docker exec -it superset bash -c "export FLASK_APP=superset && superset db upgrade"
+# Initialize Superset database with config path set
+docker exec -it superset bash -c "export FLASK_APP=superset && export SUPERSET_CONFIG_PATH=/app/pythonpath/superset_config.py && superset db upgrade"
 
 # Create admin user if not exists
-docker exec -it superset bash -c "export FLASK_APP=superset && superset fab create-admin \
+docker exec -it superset bash -c "export FLASK_APP=superset && export SUPERSET_CONFIG_PATH=/app/pythonpath/superset_config.py && superset fab create-admin \
     --username \"$ADMIN_USERNAME\" \
     --firstname Admin \
     --lastname User \
@@ -1271,10 +1288,10 @@ docker exec -it superset bash -c "export FLASK_APP=superset && superset fab crea
     --password \"$ADMIN_PASSWORD\""
 
 # Initialize Superset roles and examples
-docker exec -it superset bash -c "export FLASK_APP=superset && superset init"
+docker exec -it superset bash -c "export FLASK_APP=superset && export SUPERSET_CONFIG_PATH=/app/pythonpath/superset_config.py && superset init"
 
 # Add Job Scraper database to Superset
-docker exec -it superset bash -c "export FLASK_APP=superset && superset set-database-uri \
+docker exec -it superset bash -c "export FLASK_APP=superset && export SUPERSET_CONFIG_PATH=/app/pythonpath/superset_config.py && superset set-database-uri \
     --database-name \"Job Scraper DB\" \
     --uri \"postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME\" \
     --expose-in-sqllab \
