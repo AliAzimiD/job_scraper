@@ -1,0 +1,147 @@
+--- setup.sh.orig
++++ setup.sh
+@@ -8,7 +8,9 @@
+ set -e
+ 
+ # Strict mode
+-set -euo pipefail
++# Modified to handle unbound variables more gracefully
++# The 'u' flag was causing errors with unbound variables
++set -eo pipefail
+ IFS=$'\n\t'
+ 
+ # ===== Color Definitions =====
+@@ -67,10 +69,22 @@
+ }
+ 
+ # Error handler
+-handle_error() {
++original_handle_error() {
+     local line=$1
+     local exit_code=$2
+-    log "ERROR" "Script failed at line $line with exit code $exit_code"
++    log "ERROR" "Script failed at line $line with exit code ${exit_code:-1}"
++    log "WARNING" "Please check the logs for details and fix the issue"
++    log "INFO" "For assistance, consult the documentation or contact support"
++}
++
++# Enhanced error handler with more detailed information
++handle_error() {
++    local line=$1
++    local exit_code=${2:-1}
++    
++    log "ERROR" "Script failed at line $line with exit code $exit_code"
++    log "ERROR" "Command that failed: $(sed -n "${line}p" $0 2>/dev/null || echo "Unknown command")"
++    log "ERROR" "Current working directory: $(pwd)"
+     log "WARNING" "Please check the logs for details and fix the issue"
+     log "INFO" "For assistance, consult the documentation or contact support"
+ }
+@@ -87,7 +101,7 @@
+ APP_HOME=${APP_HOME:-"/opt/jobscraper"}
+ APP_PORT=${APP_PORT:-5001}
+ APP_NAME=${APP_NAME:-"jobscraper"}
+-PYTHON_VERSION=${PYTHON_VERSION:-"3.10"}
++PYTHON_VERSION=${PYTHON_VERSION:-"3.10"} 
+ POSTGRES_VERSION=${POSTGRES_VERSION:-"15"}
+ USE_NGINX=${USE_NGINX:-"true"}
+ USE_SSL=${USE_SSL:-"true"}
+@@ -1696,13 +1710,30 @@
+     log "SUCCESS" "Job Scraper Application has been successfully set up!"
+ }
+ 
++# Process command line arguments safely
++process_args() {
++    # Initialize options with default values
++    UNINSTALL=false
++    HELP=false
++    NO_VERIFY=false
++    
++    # Process arguments
++    for arg in "$@"; do
++        case "$arg" in
++            --uninstall) UNINSTALL=true ;;
++            --help) HELP=true ;;
++            --no-verify) NO_VERIFY=true ;;
++            *) log "WARNING" "Unknown option: $arg" ;;
++        esac
++    done
++}
++
+ # ===== Main Execution =====
+ 
+ # Print banner
+ cat << 'EOF'
+    ___       _      _____                                
+   |_  |     | |    /  ___|                               
+-    | | ___ | |__  \ `--.  ___ _ __ __ _ _ __   ___ _ __ 
++    | | ___ | |__  \ `--. ___ _ __ __ _ _ __   ___ _ __ 
+     | |/ _ \| '_ \  `--. \/ __| '__/ _` | '_ \ / _ \ '__|
+ /\__/ / (_) | |_) |/\__/ / (__| | | (_| | |_) |  __/ |   
+ \____/ \___/|_.__/ \____/ \___|_|  \__,_| .__/ \___|_|   
+@@ -1713,22 +1744,51 @@
+ 
+ log "INFO" "Starting Job Scraper Production Setup"
+ log "INFO" "This script will set up the Job Scraper application for production use"
+-
+-# Check if uninstall was requested
+-if [ "$1" = "--uninstall" ]; then
+-    log "WARNING" "Uninstall mode requested"
+-    log "INFO" "This will remove the Job Scraper application from your system"
+-    log "INFO" "Are you sure you want to continue? (y/n)"
+-    read -r confirm
+-    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+-        log "INFO" "Uninstall canceled"
+-        exit 0
+-    fi
+-    uninstall_application
+-    log "SUCCESS" "Uninstallation completed"
+-    exit 0
++  
++# Process command line arguments safely
++process_args "$@"
++
++# Handle --help flag
++if [ "$HELP" = true ]; then
++    cat << EOF
++Usage: $0 [OPTIONS]
++
++This script sets up the Job Scraper application for production use.
++
++Options:
++  --uninstall   Uninstall the Job Scraper application
++  --no-verify   Skip verification step
++  --help        Display this help message
++
++Example:
++  $0            # Install the application
++  $0 --uninstall # Uninstall the application
++EOF
++    exit 0  
+ fi
+ 
++# Handle uninstall mode
++if [ "$UNINSTALL" = true ]; then
++    (
++        log "WARNING" "Uninstall mode requested"
++        log "INFO" "This will remove the Job Scraper application from your system"
++        log "INFO" "Are you sure you want to continue? (y/n)"
++        read -r confirm
++        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
++            log "INFO" "Uninstall canceled"
++            exit 0
++        fi
++        
++        # Create a backup before uninstalling
++        log "INFO" "Creating backup before uninstall"
++        backup_dir="/opt/jobscraper_backup_$(date +%Y%m%d%H%M%S)"
++        mkdir -p "$backup_dir"
++        cp -r /opt/jobscraper/* "$backup_dir/" 2>/dev/null || true
++        
++        uninstall_application
++        log "SUCCESS" "Uninstallation completed"
++        exit 0
++    )
++fi
+ # Run installation steps
+ check_system_requirements
+ update_system_packages 

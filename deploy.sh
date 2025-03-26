@@ -69,6 +69,9 @@ check_config() {
         exit 1
     fi
     
+    # Load main configuration
+    source "$CONFIG_FILE"
+    
     # Check for local config with sensitive data
     LOCAL_CONFIG="deploy.local.conf"
     if [ -f "$LOCAL_CONFIG" ]; then
@@ -76,20 +79,68 @@ check_config() {
         source "$LOCAL_CONFIG"
     else
         log "WARNING" "Local config file ($LOCAL_CONFIG) not found"
-        log "INFO" "Please create this file with your GitHub token:"
+        log "INFO" "You may want to create this file with your GitHub credentials:"
         echo "GITHUB_TOKEN=\"your-github-token\"" > "$LOCAL_CONFIG.example"
+        echo "# OR use username/password" >> "$LOCAL_CONFIG.example"
+        echo "GITHUB_USERNAME=\"your-username\"" >> "$LOCAL_CONFIG.example"
+        echo "GITHUB_PASSWORD=\"your-password\"" >> "$LOCAL_CONFIG.example" 
         log "INFO" "See $LOCAL_CONFIG.example for template"
-        log "ERROR" "Cannot proceed without GitHub authentication"
-        exit 1
+        log "INFO" "Continuing without GitHub credentials (will work only for public repositories)"
     fi
 }
 
 # Generate server setup script from template
 generate_server_setup() {
     log "INFO" "Generating server setup script"
+    
+    # Create server setup script
     cat > server_setup.sh << 'EOF'
 #!/bin/bash
 # This is a generated script to prepare the server for deployment
+
+# Print status
+echo "Setting up server for deployment..."
+echo "REMOTE_PATH: $REMOTE_PATH"
+
+# Function to fix Nginx configuration
+fix_nginx() {
+    echo "Checking and fixing Nginx configuration..."
+    
+    # Check if Nginx is installed
+    if ! command -v nginx &> /dev/null; then
+        echo "Nginx not installed. Installing..."
+        apt update
+        apt install -y nginx
+    else
+        echo "Nginx is already installed"
+    fi
+    
+    # Make sure Nginx is enabled and running
+    systemctl enable nginx
+    systemctl start nginx
+    
+    # Copy our custom Nginx configuration if it exists
+    if [ -f "nginx_jobscraper.conf" ]; then
+        echo "Installing custom Nginx configuration..."
+        cp nginx_jobscraper.conf /etc/nginx/sites-available/jobscraper
+        
+        # Enable the site
+        ln -sf /etc/nginx/sites-available/jobscraper /etc/nginx/sites-enabled/
+        
+        # Remove default site if it exists
+        if [ -f "/etc/nginx/sites-enabled/default" ]; then
+            rm -f /etc/nginx/sites-enabled/default
+        fi
+        
+        # Test configuration
+        nginx -t
+        
+        # Reload Nginx
+        systemctl reload nginx
+    else
+        echo "Custom Nginx configuration not found"
+    fi
+}
 
 # Check if Docker is installed
 if ! command -v docker &> /dev/null; then
@@ -103,11 +154,55 @@ if ! command -v docker &> /dev/null; then
 fi
 
 # Create deployment directory if it doesn't exist
+if [ -z "$REMOTE_PATH" ]; then
+    echo "ERROR: REMOTE_PATH is not set"
+    exit 1
+fi
+
+echo "Creating deployment directory: $REMOTE_PATH"
 mkdir -p "$REMOTE_PATH"
+chmod 755 "$REMOTE_PATH"
+
+# Fix Nginx configuration
+fix_nginx
 
 echo "Server preparation completed"
 EOF
     chmod +x server_setup.sh
+    
+    # Create Nginx configuration file with correct domain name
+    log "INFO" "Generating Nginx configuration"
+    cat > nginx_jobscraper.conf << EOF
+server {
+    listen 80;
+    server_name $DOMAIN_NAME;
+
+    access_log /var/log/nginx/jobscraper_access.log;
+    error_log /var/log/nginx/jobscraper_error.log;
+
+    location / {
+        proxy_pass http://127.0.0.1:$APP_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 60s;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
+    location /static {
+        alias $APP_HOME/static;
+        expires 30d;
+    }
+
+    # Add security headers
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+}
+EOF
 }
 
 # Generate auto-answer file for setup.sh
@@ -147,18 +242,20 @@ EOF
 setup_github_auth() {
     log "INFO" "Setting up GitHub authentication for deployment"
     
-    # Check if we already have credentials cached
-    GIT_CREDS_STATUS=$(git config --global credential.helper)
-    
-    if [ -z "$GIT_CREDS_STATUS" ]; then
-        log "INFO" "Configuring Git credential helper to cache credentials"
-        git config --global credential.helper 'cache --timeout=3600'
-        
-        log "INFO" "You'll be prompted for GitHub credentials during deployment"
-        log "INFO" "These will be cached temporarily and not stored in the repository"
+    # Instead of using credential.helper, we'll directly inject username/password into the URL
+    if [ -n "$GITHUB_USERNAME" ] && [ -n "$GITHUB_PASSWORD" ]; then
+        # Replace the URL with one containing credentials
+        REPO_URL="https://$GITHUB_USERNAME:$GITHUB_PASSWORD@${REPO_URL#https://}"
+        log "INFO" "GitHub credentials applied to repository URL"
+    elif [ -n "$GITHUB_TOKEN" ]; then
+        # Use a token if provided
+        REPO_URL="https://$GITHUB_TOKEN@${REPO_URL#https://}"
+        log "INFO" "GitHub token applied to repository URL"
     else
-        log "INFO" "Git credential helper already configured: $GIT_CREDS_STATUS"
+        log "WARNING" "No GitHub credentials provided. Public repositories will work, but private repositories will fail."
     fi
+    
+    export REPO_URL
 }
 
 # Test deployment using Docker
@@ -185,6 +282,72 @@ test_deployment() {
     log "SUCCESS" "Test deployment completed"
 }
 
+# Add function to check and fix common application issues
+run_post_deployment_troubleshooting() {
+    log "INFO" "Running post-deployment diagnostics..."
+    
+    # Connect to server and run checks
+    ssh -t "$SERVER_USER@$SERVER_HOST" "
+        echo '============================================================'
+        echo 'RUNNING COMPREHENSIVE POST-DEPLOYMENT CHECKS'
+        echo '============================================================'
+        
+        # Check if Nginx is installed and running
+        echo '1. Checking Nginx status:'
+        if ! command -v nginx &> /dev/null; then
+            echo '   ERROR: Nginx is not installed'
+        else
+            echo '   Nginx is installed'
+            systemctl status nginx | grep -E 'Active:|running'
+            
+            # Check Nginx configuration
+            echo '   Validating Nginx configuration:'
+            nginx -t
+            
+            # Check Nginx config files
+            echo '   Checking Nginx site configuration:'
+            ls -la /etc/nginx/sites-enabled/
+            cat /etc/nginx/sites-enabled/jobscraper 2>/dev/null || echo '   No jobscraper site configuration found'
+        fi
+        
+        # Check if application service is running
+        echo '2. Checking application service status:'
+        systemctl status jobscraper | grep -E 'Active:|running' || echo '   jobscraper service not found or not running'
+        
+        # Check application logs
+        echo '3. Checking application logs:'
+        if [ -d '/opt/jobscraper/logs' ]; then
+            tail -n 20 /opt/jobscraper/logs/*.log 2>/dev/null || echo '   No log files found'
+        else
+            echo '   Application log directory not found'
+        fi
+        
+        # Check port usage
+        echo '4. Checking if application port is in use:'
+        netstat -tuln | grep 5001 || echo '   Port 5001 is not in use by any application'
+        
+        # Check firewall status
+        echo '5. Checking firewall status:'
+        if command -v ufw &> /dev/null; then
+            ufw status
+        else
+            echo '   UFW firewall not installed'
+        fi
+        
+        # Check Nginx error logs
+        echo '6. Checking Nginx error logs:'
+        tail -n 30 /var/log/nginx/error.log
+        
+        # Attempt to directly access the application
+        echo '7. Attempting to connect to application directly:'
+        curl -v http://localhost:5001/ 2>&1 | grep -E 'Connected|HTTP/|<'
+        
+        echo '============================================================'
+        echo 'END OF DIAGNOSTICS'
+        echo '============================================================'
+    "
+}
+
 # Run deployment
 deploy() {
     log "INFO" "Starting deployment process"
@@ -201,7 +364,7 @@ deploy() {
     
     # Create deployment package
     log "INFO" "Creating deployment package"
-    tar -czf deploy_package.tar.gz *.sh deploy.conf
+    tar -czf deploy_package.tar.gz *.sh deploy.conf nginx_jobscraper.conf
     
     # Check if sshpass is needed and installed
     if [ -n "$SERVER_PASSWORD" ]; then
@@ -230,13 +393,19 @@ deploy() {
             source deploy.conf
             
             # Run server setup with REMOTE_PATH
-            REMOTE_PATH=\"$REMOTE_PATH\" ./server_setup.sh
+            export REMOTE_PATH=\"$REMOTE_PATH\"
+            chmod +x ./server_setup.sh
+            ./server_setup.sh
+            
+            # Make sure REMOTE_PATH exists
+            mkdir -p \"$REMOTE_PATH\"
             
             # If uninstall flag was specified, run uninstallation first
             if [ \"$DO_UNINSTALL\" = true ]; then
-                if [ -d \"$REMOTE_PATH\" ]; then
+                if [ -d \"$REMOTE_PATH\" ] && [ -f \"$REMOTE_PATH/setup.sh\" ]; then
                     cd \"$REMOTE_PATH\"
-                    sudo ./setup.sh --uninstall
+                    sudo ./setup.sh --uninstall || echo "No previous installation to uninstall or uninstall failed"
+                    cd ~
                 fi
             fi
             
@@ -245,17 +414,40 @@ deploy() {
             
             # Clone fresh repository (will prompt for credentials if needed)
             sudo rm -rf \"$REMOTE_PATH\"
+            mkdir -p \"$REMOTE_PATH\"
             git clone -b \"$REPO_BRANCH\" \"$REPO_URL\" \"$REMOTE_PATH\"
+            
+            # Verify the clone was successful
+            if [ ! -d \"$REMOTE_PATH\" ] || [ ! -f \"$REMOTE_PATH/setup.sh\" ]; then
+                echo \"Failed to clone repository or setup.sh not found in cloned repository\"
+                exit 1
+            fi
+            
+            # Navigate to the repository directory
             cd \"$REMOTE_PATH\"
             
             # Source the answers file to pre-set environment variables
             source ~/deploy_tmp/setup_answers.sh
             
             # Run setup script
+            echo 'Running setup script...'
+            if [ \"$DO_UNINSTALL\" = true ]; then
+                echo "Running in uninstall mode first..."
+                sudo -E ./setup.sh --uninstall || {
+                    echo 'Uninstall failed, but continuing with installation'
+                }
+            fi
+            
             if [ \"$DO_VERIFY\" = true ]; then
-                sudo -E ./setup.sh
+                sudo -E ./setup.sh || {
+                    echo 'Setup script failed'
+                    exit 1
+                }
             else
-                sudo -E ./setup.sh --no-verify
+                sudo -E ./setup.sh --no-verify || {
+                    echo 'Setup script failed'
+                    exit 1
+                }
             fi
             
             # Clean up
@@ -271,6 +463,8 @@ deploy() {
         # Execute deployment on server using SSH key
         log "INFO" "Executing deployment on server"
         ssh -t "$SERVER_USER@$SERVER_HOST" "
+            set -e
+            
             # Extract deployment package
             mkdir -p ~/deploy_tmp
             tar -xzf ~/deploy_package.tar.gz -C ~/deploy_tmp
@@ -280,39 +474,81 @@ deploy() {
             source deploy.conf
             
             # Run server setup with REMOTE_PATH
-            REMOTE_PATH=\"$REMOTE_PATH\" ./server_setup.sh
+            export REMOTE_PATH=\"$REMOTE_PATH\"
+            chmod +x ./server_setup.sh
+            ./server_setup.sh
+            
+            # Make sure REMOTE_PATH exists
+            mkdir -p \"$REMOTE_PATH\"
             
             # If uninstall flag was specified, run uninstallation first
             if [ \"$DO_UNINSTALL\" = true ]; then
-                if [ -d \"$REMOTE_PATH\" ]; then
+                if [ -d \"$REMOTE_PATH\" ] && [ -f \"$REMOTE_PATH/setup.sh\" ]; then
                     cd \"$REMOTE_PATH\"
-                    sudo ./setup.sh --uninstall
+                    echo 'Running uninstall...'
+                    sudo ./setup.sh --uninstall || echo 'No previous installation to uninstall or uninstall failed'
+                    cd ~
+                else
+                    echo 'No previous installation found to uninstall'
                 fi
             fi
             
-            # Setup Git credential helper on the server
-            git config --global credential.helper 'cache --timeout=3600'
-            
-            # Clone fresh repository (will prompt for credentials if needed)
+            # Clone fresh repository with credentials in URL
             sudo rm -rf \"$REMOTE_PATH\"
-            git clone -b \"$REPO_BRANCH\" \"$REPO_URL\" \"$REMOTE_PATH\"
+            mkdir -p \"$REMOTE_PATH\"
+            
+            echo 'Cloning repository...'
+            git clone -b \"$REPO_BRANCH\" \"$REPO_URL\" \"$REMOTE_PATH\" || {
+                echo 'Failed to clone repository'
+                exit 1
+            }
+            
+            # Verify the clone was successful
+            if [ ! -d \"$REMOTE_PATH\" ] || [ ! -f \"$REMOTE_PATH/setup.sh\" ]; then
+                echo \"Repository cloned but setup.sh not found in cloned repository\"
+                exit 1
+            fi
+            
+            # Navigate to the repository directory
             cd \"$REMOTE_PATH\"
+            
+            # Make sure setup.sh is executable
+            chmod +x setup.sh
             
             # Source the answers file to pre-set environment variables
             source ~/deploy_tmp/setup_answers.sh
             
             # Run setup script
+            echo 'Running setup script...'
+            if [ \"$DO_UNINSTALL\" = true ]; then
+                echo "Running in uninstall mode first..."
+                sudo -E ./setup.sh --uninstall || {
+                    echo 'Uninstall failed, but continuing with installation'
+                }
+            fi
+            
             if [ \"$DO_VERIFY\" = true ]; then
-                sudo -E ./setup.sh
+                sudo -E ./setup.sh || {
+                    echo 'Setup script failed'
+                    exit 1
+                }
             else
-                sudo -E ./setup.sh --no-verify
+                sudo -E ./setup.sh --no-verify || {
+                    echo 'Setup script failed'
+                    exit 1
+                }
             fi
             
             # Clean up
             cd ~
             rm -rf ~/deploy_tmp
             rm deploy_package.tar.gz
-        "
+            
+            echo 'Deployment completed on server'
+        " || {
+            log "ERROR" "Deployment failed on server"
+            exit 1
+        }
     fi
     
     log "SUCCESS" "Deployment completed successfully!"
@@ -329,23 +565,8 @@ deploy() {
         fi
     fi
 
-    # Add troubleshooting steps after successful deployment
-    log "INFO" "Running post-deployment checks..."
-    ssh -t "$SERVER_USER@$SERVER_HOST" "
-        echo \"Checking Nginx status...\"
-        systemctl status nginx || echo \"Nginx service not running properly\"
-        
-        echo \"Checking application service status...\"
-        systemctl status jobscraper || echo \"Application service not running properly\"
-        
-        echo \"Checking Nginx configuration...\"
-        nginx -t || echo \"Nginx configuration has errors\"
-        
-        echo \"Checking logs for errors...\"
-        tail -n 20 /var/log/nginx/error.log
-        
-        echo \"Post-deployment checks completed\"
-    "
+    # Run post-deployment troubleshooting
+    run_post_deployment_troubleshooting
 }
 
 # Create local test script
