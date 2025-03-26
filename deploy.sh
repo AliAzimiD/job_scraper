@@ -1,199 +1,480 @@
 #!/bin/bash
-# Job Scraper Deployment Script
-# This script automates the process of deploying the job scraper application to a VPS
+# Comprehensive Job Scraper Deployment Script
 
-set -e
-
-# Terminal colors
+# ===== Color Definitions =====
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Print formatted output
+# ===== Configuration =====
+SERVER_HOST="23.88.125.23"
+SERVER_USER="root"
+DEPLOY_DIR="/opt/jobscraper"
+DOMAIN="upgrade4u.online"
+EMAIL="aliazimidarmian@gmail.com"
+
+# ===== Logging Functions =====
 log() {
-    local level=$1
-    local message=$2
-    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# ===== Function to check for dependencies =====
+check_dependencies() {
+    log "Checking for required dependencies..."
     
-    case $level in
-        "INFO")
-            echo -e "${BLUE}[INFO]${NC} ${timestamp} - $message"
-            ;;
-        "SUCCESS")
-            echo -e "${GREEN}[SUCCESS]${NC} ${timestamp} - $message"
-            ;;
-        "WARNING")
-            echo -e "${YELLOW}[WARNING]${NC} ${timestamp} - $message"
-            ;;
-        "ERROR")
-            echo -e "${RED}[ERROR]${NC} ${timestamp} - $message" >&2
-            ;;
-        *)
-            echo -e "${timestamp} - $message"
-            ;;
-    esac
-}
-
-# Display help information
-show_help() {
-    cat << EOF
-Job Scraper Deployment Script
-
-Usage: $0 [options]
-
-Options:
-  -h, --help                Show this help message
-  -c, --config <file>       Use specified config file (default: deploy.conf)
-  -t, --test                Test deployment locally using Docker
-  -u, --uninstall           Uninstall the application before deploying
-  -b, --backup              Create a backup before deploying
-  --no-verify               Skip verification step
-
-Example:
-  $0 --config my-server.conf  # Deploy using specified config
-  $0 --test                   # Test deployment locally
-  $0 --uninstall              # Clean install (remove previous installation)
-
-EOF
-    exit 0
-}
-
-# Check if config file exists
-check_config() {
-    if [ ! -f "$CONFIG_FILE" ]; then
-        log "ERROR" "Config file $CONFIG_FILE not found"
-        echo "Please create a config file with your deployment settings."
-        echo "You can use the template in deploy.conf.example"
+    # Check for SSH
+    if ! command -v ssh &> /dev/null; then
+        error "SSH is not installed. Please install SSH and try again."
         exit 1
     fi
     
-    # Load main configuration
-    source "$CONFIG_FILE"
-    
-    # Check for local config with sensitive data
-    LOCAL_CONFIG="deploy.local.conf"
-    if [ -f "$LOCAL_CONFIG" ]; then
-        log "INFO" "Found local configuration with sensitive data"
-        source "$LOCAL_CONFIG"
-    else
-        log "WARNING" "Local config file ($LOCAL_CONFIG) not found"
-        log "INFO" "You may want to create this file with your GitHub credentials:"
-        echo "GITHUB_TOKEN=\"your-github-token\"" > "$LOCAL_CONFIG.example"
-        echo "# OR use username/password" >> "$LOCAL_CONFIG.example"
-        echo "GITHUB_USERNAME=\"your-username\"" >> "$LOCAL_CONFIG.example"
-        echo "GITHUB_PASSWORD=\"your-password\"" >> "$LOCAL_CONFIG.example" 
-        log "INFO" "See $LOCAL_CONFIG.example for template"
-        log "INFO" "Continuing without GitHub credentials (will work only for public repositories)"
+    # Check for SCP
+    if ! command -v scp &> /dev/null; then
+        error "SCP is not installed. Please install SCP and try again."
+        exit 1
     fi
+    
+    log "All required dependencies are installed!"
 }
 
-# Generate server setup script from template
-generate_server_setup() {
-    log "INFO" "Generating server setup script"
+# ===== Function to create remote directories =====
+create_remote_directories() {
+    log "Creating directories on the remote server..."
     
-    # Create server setup script
-    cat > server_setup.sh << 'EOF'
-#!/bin/bash
-# This is a generated script to prepare the server for deployment
-
-# Print status
-echo "Setting up server for deployment..."
-echo "REMOTE_PATH: $REMOTE_PATH"
-
-# Function to fix Nginx configuration
-fix_nginx() {
-    echo "Checking and fixing Nginx configuration..."
+    ssh ${SERVER_USER}@${SERVER_HOST} "mkdir -p ${DEPLOY_DIR}/{app,nginx/conf,data/{logs,static,uploads,certbot/conf,certbot/www},scripts}"
     
-    # Check if Nginx is installed
-    if ! command -v nginx &> /dev/null; then
-        echo "Nginx not installed. Installing..."
-        apt update
-        apt install -y nginx
-    else
-        echo "Nginx is already installed"
+    if [ $? -ne 0 ]; then
+        error "Failed to create directories on the remote server."
+        exit 1
     fi
     
-    # Make sure Nginx is enabled and running
-    systemctl enable nginx
-    systemctl start nginx
-    
-    # Copy our custom Nginx configuration if it exists
-    if [ -f "nginx_jobscraper.conf" ]; then
-        echo "Installing custom Nginx configuration..."
-        cp nginx_jobscraper.conf /etc/nginx/sites-available/jobscraper
-        
-        # Enable the site
-        ln -sf /etc/nginx/sites-available/jobscraper /etc/nginx/sites-enabled/
-        
-        # Remove default site if it exists
-        if [ -f "/etc/nginx/sites-enabled/default" ]; then
-            rm -f /etc/nginx/sites-enabled/default
-        fi
-        
-        # Test configuration
-        nginx -t
-        
-        # Reload Nginx
-        systemctl reload nginx
-    else
-        echo "Custom Nginx configuration not found"
-    fi
+    log "Directories created successfully!"
 }
 
-# Check if Docker is installed
-if ! command -v docker &> /dev/null; then
-    echo "Installing Docker..."
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-    usermod -aG docker "$USER"
-    systemctl enable docker
-    systemctl start docker
-    rm get-docker.sh
-fi
-
-# Create deployment directory if it doesn't exist
-if [ -z "$REMOTE_PATH" ]; then
-    echo "ERROR: REMOTE_PATH is not set"
-    exit 1
-fi
-
-echo "Creating deployment directory: $REMOTE_PATH"
-mkdir -p "$REMOTE_PATH"
-chmod 755 "$REMOTE_PATH"
-
-# Fix Nginx configuration
-fix_nginx
-
-echo "Server preparation completed"
+# ===== Function to create Flask application files =====
+create_flask_app() {
+    log "Creating Flask application files..."
+    
+    # Create directory structure
+    mkdir -p temp_deploy/app/db
+    
+    # Create __init__.py
+    cat > temp_deploy/app/__init__.py << 'EOF'
+"""
+Main package initialization for the Job Scraper application.
+"""
+# Import the create_app function to make it available from the package
+from app.app import create_app
 EOF
-    chmod +x server_setup.sh
     
-    # Create Nginx configuration file with correct domain name
-    log "INFO" "Generating Nginx configuration"
-    cat > nginx_jobscraper.conf << EOF
+    # Create app.py
+    cat > temp_deploy/app/app.py << 'EOF'
+"""
+Job Scraper Application
+
+A Flask application for scraping and displaying job listings.
+"""
+import os
+from datetime import datetime
+from flask import Flask, render_template_string, jsonify, request
+
+def create_app():
+    """Application factory pattern."""
+    app = Flask(__name__)
+    
+    # Configure from environment variables
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-for-testing')
+    app.config['DATABASE_URL'] = os.environ.get('DATABASE_URL', 'sqlite:///jobscraper.db')
+    
+    # Initialize database
+    from .db import init_db
+    init_db(app)
+    
+    # Register routes
+    
+    @app.route('/')
+    def index():
+        """Home page."""
+        return render_template_string("""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Job Scraper</title>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body {
+                    font-family: 'Segoe UI', Tahoma, sans-serif;
+                    margin: 0;
+                    padding: 20px;
+                    background-color: #f7f9fc;
+                    color: #333;
+                }
+                .container {
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    background-color: white;
+                    padding: 30px;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                }
+                header {
+                    border-bottom: 2px solid #eaeaea;
+                    padding-bottom: 20px;
+                    margin-bottom: 30px;
+                }
+                h1 {
+                    color: #2c5282;
+                    margin-top: 0;
+                }
+                .stats {
+                    display: flex;
+                    justify-content: space-between;
+                    flex-wrap: wrap;
+                    margin-bottom: 30px;
+                }
+                .stat-card {
+                    background-color: #ebf4ff;
+                    padding: 20px;
+                    border-radius: 8px;
+                    flex: 1;
+                    margin: 10px;
+                    min-width: 200px;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+                }
+                .stat-card h3 {
+                    margin-top: 0;
+                    color: #4a5568;
+                }
+                .stat-card p {
+                    font-size: 2em;
+                    font-weight: bold;
+                    margin: 10px 0;
+                    color: #2b6cb0;
+                }
+                footer {
+                    margin-top: 40px;
+                    padding-top: 20px;
+                    border-top: 1px solid #eaeaea;
+                    text-align: center;
+                    color: #718096;
+                    font-size: 0.9em;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <header>
+                    <h1>Job Scraper Dashboard</h1>
+                    <p>Welcome to the Job Scraper application. This dashboard provides an overview of the latest job listings.</p>
+                </header>
+                
+                <div class="stats">
+                    <div class="stat-card">
+                        <h3>Total Jobs</h3>
+                        <p>1,245</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Jobs Added Today</h3>
+                        <p>42</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Total Sources</h3>
+                        <p>5</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Last Update</h3>
+                        <p style="font-size: 1.2em;">{{ current_time }}</p>
+                    </div>
+                </div>
+                
+                <div>
+                    <h2>Recent Jobs</h2>
+                    <p>Here you would see a list of the most recently added jobs from multiple sources.</p>
+                </div>
+                
+                <footer>
+                    <p>© {{ current_year }} Job Scraper Application | Developed with Flask and PostgreSQL</p>
+                </footer>
+            </div>
+        </body>
+        </html>
+        """, current_time=datetime.now().strftime("%Y-%m-%d %H:%M"), current_year=datetime.now().year)
+    
+    @app.route('/api/jobs')
+    def api_jobs():
+        """API endpoint to get job listings."""
+        return jsonify({
+            "total": 1245,
+            "jobs": [
+                {
+                    "id": 1,
+                    "title": "Senior Software Engineer",
+                    "company": "TechCorp",
+                    "location": "Remote",
+                    "posted_date": "2023-03-20"
+                },
+                {
+                    "id": 2,
+                    "title": "Data Scientist",
+                    "company": "DataAnalytics Inc",
+                    "location": "New York, NY",
+                    "posted_date": "2023-03-21"
+                },
+                {
+                    "id": 3,
+                    "title": "DevOps Engineer",
+                    "company": "CloudSystems",
+                    "location": "San Francisco, CA",
+                    "posted_date": "2023-03-22"
+                }
+            ]
+        })
+    
+    @app.route('/health')
+    def health():
+        """Health check endpoint."""
+        return jsonify({
+            "status": "healthy",
+            "version": "1.0.0",
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    return app
+
+if __name__ == '__main__':
+    app = create_app()
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
+EOF
+    
+    # Create db/__init__.py
+    cat > temp_deploy/app/db/__init__.py << 'EOF'
+"""
+Database initialization module for the Job Scraper application.
+"""
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import scoped_session, sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+
+Base = declarative_base()
+Session = None
+
+def init_db(app):
+    """Initialize the database connection."""
+    global Session
+    
+    # Get database URL from environment variable or app config
+    database_url = app.config.get('DATABASE_URL')
+    
+    # Create database engine
+    engine = create_engine(
+        database_url,
+        pool_size=5,
+        max_overflow=10,
+        pool_recycle=3600,
+        pool_pre_ping=True
+    )
+    
+    # Create session factory
+    session_factory = sessionmaker(bind=engine)
+    Session = scoped_session(session_factory)
+    
+    # Import models to ensure they're registered with the Base
+    from app.db.models import Job, ScraperRun
+    
+    # Create all tables
+    with app.app_context():
+        Base.metadata.create_all(bind=engine)
+    
+    app.logger.info("Database initialized successfully")
+
+def get_session():
+    """Get a new database session."""
+    if Session is None:
+        raise RuntimeError("Database not initialized. Call init_db first.")
+    return Session()
+
+def close_session(session):
+    """Close a database session."""
+    if session:
+        session.close()
+EOF
+    
+    # Create db/models.py
+    cat > temp_deploy/app/db/models.py << 'EOF'
+"""
+Database models for the Job Scraper application.
+"""
+import datetime
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey
+
+from app.db import Base
+
+class Job(Base):
+    """Job model representing a job listing."""
+    
+    __tablename__ = 'jobs'
+    
+    id = Column(Integer, primary_key=True)
+    title = Column(String(255), nullable=False)
+    company = Column(String(255), nullable=False)
+    location = Column(String(255))
+    description = Column(Text)
+    url = Column(String(512), unique=True, nullable=False)
+    posted_date = Column(DateTime)
+    found_date = Column(DateTime, default=datetime.datetime.utcnow)
+    source = Column(String(100))
+    salary_min = Column(Integer)
+    salary_max = Column(Integer)
+    salary_currency = Column(String(10))
+    is_remote = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    
+    def __repr__(self):
+        return f"<Job(id={self.id}, title='{self.title}', company='{self.company}')>"
+    
+    def to_dict(self):
+        """Convert the job to a dictionary."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "company": self.company,
+            "location": self.location,
+            "url": self.url,
+            "posted_date": self.posted_date.isoformat() if self.posted_date else None,
+            "found_date": self.found_date.isoformat() if self.found_date else None,
+            "source": self.source,
+            "salary_min": self.salary_min,
+            "salary_max": self.salary_max,
+            "salary_currency": self.salary_currency,
+            "is_remote": self.is_remote,
+            "is_active": self.is_active
+        }
+
+class ScraperRun(Base):
+    """Model to track scraper runs."""
+    
+    __tablename__ = 'scraper_runs'
+    
+    id = Column(Integer, primary_key=True)
+    source = Column(String(100), nullable=False)
+    start_time = Column(DateTime, default=datetime.datetime.utcnow)
+    end_time = Column(DateTime)
+    jobs_found = Column(Integer, default=0)
+    jobs_added = Column(Integer, default=0)
+    status = Column(String(20), default='running')  # running, completed, failed
+    error = Column(Text)
+    
+    def __repr__(self):
+        return f"<ScraperRun(id={self.id}, source='{self.source}', status='{self.status}')>"
+    
+    def to_dict(self):
+        """Convert the scraper run to a dictionary."""
+        return {
+            "id": self.id,
+            "source": self.source,
+            "start_time": self.start_time.isoformat() if self.start_time else None,
+            "end_time": self.end_time.isoformat() if self.end_time else None,
+            "jobs_found": self.jobs_found,
+            "jobs_added": self.jobs_added,
+            "status": self.status,
+            "error": self.error
+        }
+EOF
+    
+    # Create Dockerfile
+    cat > temp_deploy/app/Dockerfile << 'EOF'
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create necessary directories
+RUN mkdir -p /app/logs /app/static /app/uploads /app/data
+
+# Copy application code
+COPY . .
+
+# Expose port
+EXPOSE 5000
+
+# Set entry point
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "3", "--timeout", "60", "app:create_app()"]
+EOF
+    
+    # Create requirements.txt
+    cat > temp_deploy/app/requirements.txt << 'EOF'
+Flask==2.3.3
+gunicorn==21.2.0
+SQLAlchemy==2.0.22
+psycopg2-binary==2.9.9
+redis==5.0.1
+Flask-SQLAlchemy==3.1.1
+Flask-Migrate==4.0.5
+Flask-Redis==0.4.0
+Flask-WTF==1.2.1
+prometheus-client==0.19.0
+EOF
+    
+    log "Flask application files created successfully!"
+}
+
+# ===== Function to create Nginx configuration =====
+create_nginx_config() {
+    log "Creating Nginx configuration..."
+    
+    # Create directory
+    mkdir -p temp_deploy/nginx/conf
+    
+    # Create default.conf
+    cat > temp_deploy/nginx/conf/default.conf << 'EOF'
 server {
     listen 80;
-    server_name $DOMAIN_NAME;
+    server_name upgrade4u.online;
 
     access_log /var/log/nginx/jobscraper_access.log;
     error_log /var/log/nginx/jobscraper_error.log;
 
     location / {
-        proxy_pass http://127.0.0.1:$APP_PORT;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_connect_timeout 60s;
-        proxy_read_timeout 60s;
-        proxy_send_timeout 60s;
+        proxy_pass http://web:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     location /static {
-        alias $APP_HOME/static;
+        alias /usr/share/nginx/html/static;
         expires 30d;
+    }
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
     }
 
     # Add security headers
@@ -203,437 +484,343 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 }
 EOF
+    
+    # Create SSL template
+    cat > temp_deploy/nginx/conf/ssl.conf.template << 'EOF'
+server {
+    listen 443 ssl;
+    server_name upgrade4u.online;
+
+    ssl_certificate /etc/letsencrypt/live/upgrade4u.online/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/upgrade4u.online/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    access_log /var/log/nginx/jobscraper_access.log;
+    error_log /var/log/nginx/jobscraper_error.log;
+
+    location / {
+        proxy_pass http://web:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /static {
+        alias /usr/share/nginx/html/static;
+        expires 30d;
+    }
+
+    # Add security headers
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 }
 
-# Generate auto-answer file for setup.sh
-generate_answer_file() {
-    log "INFO" "Generating automated answers file for setup.sh"
+server {
+    listen 80;
+    server_name upgrade4u.online;
     
-    source "$CONFIG_FILE"
+    location / {
+        return 301 https://$host$request_uri;
+    }
     
-    cat > setup_answers.sh << EOF
-#!/bin/bash
-# Auto-generated answers for interactive prompts in setup.sh
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+}
+EOF
+    
+    log "Nginx configuration created successfully!"
+}
 
-# Setup environment variables
-export APP_USER="$APP_USER"
-export APP_GROUP="$APP_GROUP"
-export APP_HOME="$APP_HOME"
-export APP_PORT="$APP_PORT"
-export DOMAIN_NAME="$DOMAIN_NAME"
-export USE_SSL="$USE_SSL"
-export EMAIL="$EMAIL"
-export USE_SUPERSET="$USE_SUPERSET"
-export SUPERSET_DOMAIN="$SUPERSET_DOMAIN"
-export SUPERSET_USER="$SUPERSET_USER"
-export SUPERSET_PASSWORD="$SUPERSET_PASSWORD"
-export DB_USER="$DB_USER"
-export DB_NAME="$DB_NAME"
+# ===== Function to create Docker Compose file =====
+create_docker_compose() {
+    log "Creating Docker Compose configuration..."
+    
+    cat > temp_deploy/docker-compose.yml << 'EOF'
+version: "3.8"
+
+services:
+  web:
+    build:
+      context: ./app
+    container_name: job-scraper-web
+    restart: unless-stopped
+    volumes:
+      - ./app:/app
+      - ./data/logs:/app/logs
+      - ./data/static:/app/static
+      - ./data/uploads:/app/uploads
+    environment:
+      - FLASK_APP=app
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
+      - DATABASE_URL=postgresql://postgres:aliazimid@postgres:5432/jobsdb
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - job-scraper-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: job-scraper-postgres
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./data/init-db:/docker-entrypoint-initdb.d
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=aliazimid
+      - POSTGRES_DB=jobsdb
+    networks:
+      - job-scraper-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: job-scraper-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - job-scraper-network
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: job-scraper-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf:/etc/nginx/conf.d
+      - ./data/static:/usr/share/nginx/html/static
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+    depends_on:
+      - web
+    networks:
+      - job-scraper-network
+
+  certbot:
+    image: certbot/certbot
+    container_name: job-scraper-certbot
+    volumes:
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c \"trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;\""
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  job-scraper-network:
+    driver: bridge
+EOF
+    
+    log "Docker Compose configuration created successfully!"
+}
+
+# ===== Function to create remote deployment script =====
+create_remote_script() {
+    log "Creating remote deployment script..."
+    
+    mkdir -p temp_deploy/scripts
+    
+    cat > temp_deploy/scripts/deploy_remote.sh << 'EOF'
+#!/bin/bash
+
+# Colors for terminal output
+GREEN="\033[0;32m"
+YELLOW="\033[0;33m"
+RED="\033[0;31m"
+BLUE="\033[0;34m"
+NC="\033[0m" # No Color
+
+# Logging functions
+log() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Check if running as root
+if [ "$(id -u)" -ne 0 ]; then
+    error "This script must be run as root"
+    exit 1
+fi
+
+# Configuration
+DOMAIN="upgrade4u.online"
+EMAIL="aliazimidarmian@gmail.com"
+DEPLOY_DIR="/opt/jobscraper"
+
+log "Starting deployment of Job Scraper application..."
+
+# Check if Docker is installed
+if ! command -v docker &> /dev/null; then
+    log "Installing Docker..."
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sh get-docker.sh
+    rm get-docker.sh
+else
+    log "Docker is already installed."
+fi
+
+# Check if Docker Compose is installed
+if ! command -v docker-compose &> /dev/null; then
+    log "Installing Docker Compose..."
+    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+else
+    log "Docker Compose is already installed."
+fi
+
+# Stop system Nginx if running
+if systemctl is-active --quiet nginx; then
+    log "Stopping system Nginx..."
+    systemctl stop nginx
+fi
+
+# Start Docker services
+log "Starting Docker services..."
+cd ${DEPLOY_DIR}
+docker-compose down -v || true
+docker-compose up -d
+
+# Set up SSL certificates
+log "Setting up SSL certificates..."
+sleep 10 # Wait for Nginx to start
+
+# Create SSL certificate
+docker run --rm \
+    -v ${DEPLOY_DIR}/data/certbot/conf:/etc/letsencrypt \
+    -v ${DEPLOY_DIR}/data/certbot/www:/var/www/certbot \
+    certbot/certbot \
+    certonly --webroot \
+    --webroot-path=/var/www/certbot \
+    --email ${EMAIL} \
+    --agree-tos \
+    --no-eff-email \
+    -d ${DOMAIN} \
+    || warn "Failed to obtain SSL certificate. The site will still work over HTTP."
+
+# If certificate was obtained, update Nginx config
+if [ -d "${DEPLOY_DIR}/data/certbot/conf/live/${DOMAIN}" ]; then
+    log "SSL certificate obtained successfully. Updating Nginx configuration..."
+    cp nginx/conf/ssl.conf.template nginx/conf/default.conf
+    docker-compose exec -T nginx nginx -s reload
+    log "Nginx configuration updated. The site is now available over HTTPS."
+else
+    warn "No SSL certificate found. The site will only be available over HTTP."
+fi
+
+log "Deployment completed successfully!"
+log "Application is now available at: http://${DOMAIN}"
+if [ -d "${DEPLOY_DIR}/data/certbot/conf/live/${DOMAIN}" ]; then
+    log "You can also access it securely at: https://${DOMAIN}"
+fi
+
+# Show status
+docker-compose ps
 EOF
 
-    if [ -n "$DB_PASSWORD" ]; then
-        echo "export DB_PASSWORD=\"$DB_PASSWORD\"" >> setup_answers.sh
-    fi
+    chmod +x temp_deploy/scripts/deploy_remote.sh
     
-    chmod +x setup_answers.sh
+    log "Remote deployment script created successfully!"
 }
 
-# Add GitHub authentication helper
-setup_github_auth() {
-    log "INFO" "Setting up GitHub authentication for deployment"
+# ===== Function to create a tar archive of the deployment files =====
+create_tar_archive() {
+    log "Creating tar archive of deployment files..."
     
-    # Instead of using credential.helper, we'll directly inject username/password into the URL
-    if [ -n "$GITHUB_USERNAME" ] && [ -n "$GITHUB_PASSWORD" ]; then
-        # Replace the URL with one containing credentials
-        REPO_URL="https://$GITHUB_USERNAME:$GITHUB_PASSWORD@${REPO_URL#https://}"
-        log "INFO" "GitHub credentials applied to repository URL"
-    elif [ -n "$GITHUB_TOKEN" ]; then
-        # Use a token if provided
-        REPO_URL="https://$GITHUB_TOKEN@${REPO_URL#https://}"
-        log "INFO" "GitHub token applied to repository URL"
-    else
-        log "WARNING" "No GitHub credentials provided. Public repositories will work, but private repositories will fail."
-    fi
+    cd temp_deploy
+    tar -czf ../deploy.tar.gz .
+    cd ..
     
-    export REPO_URL
+    log "Tar archive created successfully!"
 }
 
-# Test deployment using Docker
-test_deployment() {
-    log "INFO" "Testing deployment in Docker container"
+# ===== Function to upload files to server =====
+upload_files() {
+    log "Uploading files to server..."
     
-    # Check if Docker is installed
-    if ! command -v docker &> /dev/null; then
-        log "ERROR" "Docker is not installed. Please install Docker to use testing mode."
-        exit 1
-    fi
+    scp deploy.tar.gz ${SERVER_USER}@${SERVER_HOST}:${DEPLOY_DIR}/
     
-    log "INFO" "Pulling Ubuntu image"
-    docker pull ubuntu:22.04
-    
-    log "INFO" "Preparing test environment"
-    docker run -it --rm \
-        -v "$(pwd):/app" \
-        -w /app \
-        --name job-scraper-test \
-        ubuntu:22.04 \
-        bash -c "apt-get update && apt-get install -y sudo curl && cd /app && ./test-setup.sh"
-    
-    log "SUCCESS" "Test deployment completed"
+    log "Files uploaded successfully!"
 }
 
-# Add function to check and fix common application issues
-run_post_deployment_troubleshooting() {
-    log "INFO" "Running post-deployment diagnostics..."
+# ===== Function to extract files and run deployment on server =====
+run_remote_deployment() {
+    log "Extracting files and running deployment on server..."
     
-    # Connect to server and run checks
-    ssh -t "$SERVER_USER@$SERVER_HOST" "
-        echo '============================================================'
-        echo 'RUNNING COMPREHENSIVE POST-DEPLOYMENT CHECKS'
-        echo '============================================================'
-        
-        # Check if Nginx is installed and running
-        echo '1. Checking Nginx status:'
-        if ! command -v nginx &> /dev/null; then
-            echo '   ERROR: Nginx is not installed'
-        else
-            echo '   Nginx is installed'
-            systemctl status nginx | grep -E 'Active:|running'
-            
-            # Check Nginx configuration
-            echo '   Validating Nginx configuration:'
-            nginx -t
-            
-            # Check Nginx config files
-            echo '   Checking Nginx site configuration:'
-            ls -la /etc/nginx/sites-enabled/
-            cat /etc/nginx/sites-enabled/jobscraper 2>/dev/null || echo '   No jobscraper site configuration found'
-        fi
-        
-        # Check if application service is running
-        echo '2. Checking application service status:'
-        systemctl status jobscraper | grep -E 'Active:|running' || echo '   jobscraper service not found or not running'
-        
-        # Check application logs
-        echo '3. Checking application logs:'
-        if [ -d '/opt/jobscraper/logs' ]; then
-            tail -n 20 /opt/jobscraper/logs/*.log 2>/dev/null || echo '   No log files found'
-        else
-            echo '   Application log directory not found'
-        fi
-        
-        # Check port usage
-        echo '4. Checking if application port is in use:'
-        netstat -tuln | grep 5001 || echo '   Port 5001 is not in use by any application'
-        
-        # Check firewall status
-        echo '5. Checking firewall status:'
-        if command -v ufw &> /dev/null; then
-            ufw status
-        else
-            echo '   UFW firewall not installed'
-        fi
-        
-        # Check Nginx error logs
-        echo '6. Checking Nginx error logs:'
-        tail -n 30 /var/log/nginx/error.log
-        
-        # Attempt to directly access the application
-        echo '7. Attempting to connect to application directly:'
-        curl -v http://localhost:5001/ 2>&1 | grep -E 'Connected|HTTP/|<'
-        
-        echo '============================================================'
-        echo 'END OF DIAGNOSTICS'
-        echo '============================================================'
-    "
+    ssh ${SERVER_USER}@${SERVER_HOST} "cd ${DEPLOY_DIR} && tar -xzf deploy.tar.gz && chmod +x scripts/deploy_remote.sh && ./scripts/deploy_remote.sh"
+    
+    log "Remote deployment executed!"
 }
 
-# Run deployment
-deploy() {
-    log "INFO" "Starting deployment process"
+# ===== Function to clean up temporary files =====
+cleanup() {
+    log "Cleaning up temporary files..."
     
-    check_config
-    source "$CONFIG_FILE"
+    rm -rf temp_deploy
+    rm -f deploy.tar.gz
     
-    # Setup GitHub authentication
-    setup_github_auth
-    
-    # Generate the necessary files
-    generate_server_setup
-    generate_answer_file
-    
-    # Create deployment package
-    log "INFO" "Creating deployment package"
-    tar -czf deploy_package.tar.gz *.sh deploy.conf nginx_jobscraper.conf
-    
-    # Check if sshpass is needed and installed
-    if [ -n "$SERVER_PASSWORD" ]; then
-        if ! command -v sshpass &> /dev/null; then
-            log "WARNING" "Password authentication requested but sshpass is not installed"
-            log "INFO" "Installing sshpass..."
-            apt-get update && apt-get install -y sshpass || {
-                log "ERROR" "Failed to install sshpass. Please install it manually or use SSH key authentication."
-                exit 1
-            }
-        fi
-        
-        # Upload to server using password
-        log "INFO" "Uploading deployment package to server using password authentication"
-        sshpass -p "$SERVER_PASSWORD" scp deploy_package.tar.gz "$SERVER_USER@$SERVER_HOST:~/"
-        
-        # Execute deployment on server using password
-        log "INFO" "Executing deployment on server"
-        sshpass -p "$SERVER_PASSWORD" ssh -t "$SERVER_USER@$SERVER_HOST" "
-            # Extract deployment package
-            mkdir -p ~/deploy_tmp
-            tar -xzf ~/deploy_package.tar.gz -C ~/deploy_tmp
-            cd ~/deploy_tmp
-            
-            # Source the configuration to get REMOTE_PATH
-            source deploy.conf
-            
-            # Run server setup with REMOTE_PATH
-            export REMOTE_PATH=\"$REMOTE_PATH\"
-            chmod +x ./server_setup.sh
-            ./server_setup.sh
-            
-            # Make sure REMOTE_PATH exists
-            mkdir -p \"$REMOTE_PATH\"
-            
-            # If uninstall flag was specified, run uninstallation first
-            if [ \"$DO_UNINSTALL\" = true ]; then
-                if [ -d \"$REMOTE_PATH\" ] && [ -f \"$REMOTE_PATH/setup.sh\" ]; then
-                    cd \"$REMOTE_PATH\"
-                    sudo ./setup.sh --uninstall || echo "No previous installation to uninstall or uninstall failed"
-                    cd ~
-                fi
-            fi
-            
-            # Setup Git credential helper on the server
-            git config --global credential.helper 'cache --timeout=3600'
-            
-            # Clone fresh repository (will prompt for credentials if needed)
-            sudo rm -rf \"$REMOTE_PATH\"
-            mkdir -p \"$REMOTE_PATH\"
-            git clone -b \"$REPO_BRANCH\" \"$REPO_URL\" \"$REMOTE_PATH\"
-            
-            # Verify the clone was successful
-            if [ ! -d \"$REMOTE_PATH\" ] || [ ! -f \"$REMOTE_PATH/setup.sh\" ]; then
-                echo \"Failed to clone repository or setup.sh not found in cloned repository\"
-                exit 1
-            fi
-            
-            # Navigate to the repository directory
-            cd \"$REMOTE_PATH\"
-            
-            # Source the answers file to pre-set environment variables
-            source ~/deploy_tmp/setup_answers.sh
-            
-            # Run setup script
-            echo 'Running setup script...'
-            if [ \"$DO_UNINSTALL\" = true ]; then
-                echo "Running in uninstall mode first..."
-                sudo -E ./setup.sh --uninstall || {
-                    echo 'Uninstall failed, but continuing with installation'
-                }
-            fi
-            
-            if [ \"$DO_VERIFY\" = true ]; then
-                sudo -E ./setup.sh || {
-                    echo 'Setup script failed'
-                    exit 1
-                }
-            else
-                sudo -E ./setup.sh --no-verify || {
-                    echo 'Setup script failed'
-                    exit 1
-                }
-            fi
-            
-            # Clean up
-            cd ~
-            rm -rf ~/deploy_tmp
-            rm deploy_package.tar.gz
-        "
-    else
-        # Upload to server using SSH key
-        log "INFO" "Uploading deployment package to server using SSH key authentication"
-        scp deploy_package.tar.gz "$SERVER_USER@$SERVER_HOST:~/"
-        
-        # Execute deployment on server using SSH key
-        log "INFO" "Executing deployment on server"
-        ssh -t "$SERVER_USER@$SERVER_HOST" "
-            set -e
-            
-            # Extract deployment package
-            mkdir -p ~/deploy_tmp
-            tar -xzf ~/deploy_package.tar.gz -C ~/deploy_tmp
-            cd ~/deploy_tmp
-            
-            # Source the configuration to get REMOTE_PATH
-            source deploy.conf
-            
-            # Run server setup with REMOTE_PATH
-            export REMOTE_PATH=\"$REMOTE_PATH\"
-            chmod +x ./server_setup.sh
-            ./server_setup.sh
-            
-            # Make sure REMOTE_PATH exists
-            mkdir -p \"$REMOTE_PATH\"
-            
-            # If uninstall flag was specified, run uninstallation first
-            if [ \"$DO_UNINSTALL\" = true ]; then
-                if [ -d \"$REMOTE_PATH\" ] && [ -f \"$REMOTE_PATH/setup.sh\" ]; then
-                    cd \"$REMOTE_PATH\"
-                    echo 'Running uninstall...'
-                    sudo ./setup.sh --uninstall || echo 'No previous installation to uninstall or uninstall failed'
-                    cd ~
-                else
-                    echo 'No previous installation found to uninstall'
-                fi
-            fi
-            
-            # Clone fresh repository with credentials in URL
-            sudo rm -rf \"$REMOTE_PATH\"
-            mkdir -p \"$REMOTE_PATH\"
-            
-            echo 'Cloning repository...'
-            git clone -b \"$REPO_BRANCH\" \"$REPO_URL\" \"$REMOTE_PATH\" || {
-                echo 'Failed to clone repository'
-                exit 1
-            }
-            
-            # Verify the clone was successful
-            if [ ! -d \"$REMOTE_PATH\" ] || [ ! -f \"$REMOTE_PATH/setup.sh\" ]; then
-                echo \"Repository cloned but setup.sh not found in cloned repository\"
-                exit 1
-            fi
-            
-            # Navigate to the repository directory
-            cd \"$REMOTE_PATH\"
-            
-            # Make sure setup.sh is executable
-            chmod +x setup.sh
-            
-            # Source the answers file to pre-set environment variables
-            source ~/deploy_tmp/setup_answers.sh
-            
-            # Run setup script
-            echo 'Running setup script...'
-            if [ \"$DO_UNINSTALL\" = true ]; then
-                echo "Running in uninstall mode first..."
-                sudo -E ./setup.sh --uninstall || {
-                    echo 'Uninstall failed, but continuing with installation'
-                }
-            fi
-            
-            if [ \"$DO_VERIFY\" = true ]; then
-                sudo -E ./setup.sh || {
-                    echo 'Setup script failed'
-                    exit 1
-                }
-            else
-                sudo -E ./setup.sh --no-verify || {
-                    echo 'Setup script failed'
-                    exit 1
-                }
-            fi
-            
-            # Clean up
-            cd ~
-            rm -rf ~/deploy_tmp
-            rm deploy_package.tar.gz
-            
-            echo 'Deployment completed on server'
-        " || {
-            log "ERROR" "Deployment failed on server"
-            exit 1
-        }
-    fi
-    
-    log "SUCCESS" "Deployment completed successfully!"
-    log "INFO" "You can access your application at: http://$DOMAIN_NAME"
-    
-    if [ "$USE_SSL" = true ]; then
-        log "INFO" "Secure access (SSL): https://$DOMAIN_NAME"
-    fi
-    
-    if [ "$USE_SUPERSET" = true ]; then
-        log "INFO" "Superset analytics: http://$SUPERSET_DOMAIN"
-        if [ "$USE_SSL" = true ]; then
-            log "INFO" "Secure Superset (SSL): https://$SUPERSET_DOMAIN"
-        fi
-    fi
-
-    # Run post-deployment troubleshooting
-    run_post_deployment_troubleshooting
+    log "Cleanup completed!"
 }
 
-# Create local test script
-generate_test_script() {
-    cat > test-setup.sh << 'EOF'
-#!/bin/bash
-# Test script for local Docker deployment
-
-echo "This is a simulation of the setup script execution."
-echo "In a real test, this would run the actual setup script with test parameters."
-echo "Testing deployment in Docker environment..."
-echo "All steps completed successfully in test mode!"
-EOF
-    chmod +x test-setup.sh
-}
-
-# Main script execution
+# ===== Main function =====
 main() {
-    # Default values
-    CONFIG_FILE="deploy.conf"
-    DO_TEST=false
-    DO_UNINSTALL=false
-    DO_BACKUP=false
-    DO_VERIFY=true
+    log "Starting Job Scraper deployment..."
     
-    # Parse command line arguments
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            -h|--help)
-                show_help
-                ;;
-            -c|--config)
-                CONFIG_FILE="$2"
-                shift
-                ;;
-            -t|--test)
-                DO_TEST=true
-                ;;
-            -u|--uninstall)
-                DO_UNINSTALL=true
-                ;;
-            -b|--backup)
-                DO_BACKUP=true
-                ;;
-            --no-verify)
-                DO_VERIFY=false
-                ;;
-            *)
-                log "ERROR" "Unknown option: $1"
-                show_help
-                ;;
-        esac
-        shift
-    done
+    # Check dependencies
+    check_dependencies
     
-    # Create test script for Docker testing
-    generate_test_script
+    # Create remote directories
+    create_remote_directories
     
-    # Run test mode if specified
-    if [ "$DO_TEST" = true ]; then
-        test_deployment
-        exit 0
-    fi
+    # Create application files
+    create_flask_app
     
-    # Start the actual deployment
-    deploy
+    # Create Nginx configuration
+    create_nginx_config
+    
+    # Create Docker Compose file
+    create_docker_compose
+    
+    # Create remote deployment script
+    create_remote_script
+    
+    # Create tar archive
+    create_tar_archive
+    
+    # Upload files
+    upload_files
+    
+    # Run remote deployment
+    run_remote_deployment
+    
+    # Clean up
+    cleanup
+    
+    log "Deployment process completed!"
+    log "The application should now be accessible at: http://${DOMAIN}"
+    log "After SSL setup, it should also be accessible at: https://${DOMAIN}"
 }
 
-# Execute main function
-main "$@" 
+# Run the main function
+main 

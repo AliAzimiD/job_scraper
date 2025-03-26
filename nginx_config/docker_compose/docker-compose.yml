@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: job-scraper-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d
+      - ./static:/static
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+    depends_on:
+      - web
+    networks:
+      - job-scraper-network
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    image: job-scraper-web:latest
+    container_name: job-scraper-web
+    restart: unless-stopped
+    expose:
+      - "5000"
+    environment:
+      - FLASK_HOST=0.0.0.0
+      - FLASK_PORT=5000
+      - FLASK_DEBUG=false
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/jobsdb
+      - REDIS_HOST=redis
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./config:/app/config
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - job-scraper-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: job-scraper-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=jobsdb
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    expose:
+      - "5432"
+    networks:
+      - job-scraper-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: job-scraper-redis
+    restart: unless-stopped
+    expose:
+      - "6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    networks:
+      - job-scraper-network
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  job-scraper-network:
+    driver: bridge

@@ -1,3 +1,8 @@
+#!/bin/bash
+echo "Setting up Job Scraper app..."
+mkdir -p /opt/jobscraper/final/{app,nginx/conf,data/{logs,static,uploads,certbot/conf,certbot/www}}
+echo "server { listen 80; server_name upgrade4u.online; location / { proxy_pass http://web:5000; } }" > /opt/jobscraper/final/nginx/conf/default.conf
+cat > /opt/jobscraper/final/docker-compose.yml << EOF
 version: "3.8"
 
 services:
@@ -80,3 +85,5 @@ volumes:
 networks:
   job-scraper-network:
     driver: bridge
+EOF
+cd /opt/jobscraper/final && docker-compose down && docker-compose up -d
