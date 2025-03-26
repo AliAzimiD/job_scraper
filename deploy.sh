@@ -68,6 +68,20 @@ check_config() {
         echo "You can use the template in deploy.conf.example"
         exit 1
     fi
+    
+    # Check for local config with sensitive data
+    LOCAL_CONFIG="deploy.local.conf"
+    if [ -f "$LOCAL_CONFIG" ]; then
+        log "INFO" "Found local configuration with sensitive data"
+        source "$LOCAL_CONFIG"
+    else
+        log "WARNING" "Local config file ($LOCAL_CONFIG) not found"
+        log "INFO" "Please create this file with your GitHub token:"
+        echo "GITHUB_TOKEN=\"your-github-token\"" > "$LOCAL_CONFIG.example"
+        log "INFO" "See $LOCAL_CONFIG.example for template"
+        log "ERROR" "Cannot proceed without GitHub authentication"
+        exit 1
+    fi
 }
 
 # Generate server setup script from template
@@ -159,6 +173,15 @@ deploy() {
     
     check_config
     source "$CONFIG_FILE"
+    
+    # Replace token placeholder in REPO_URL
+    if [ -n "$GITHUB_TOKEN" ]; then
+        REPO_URL="${REPO_URL/GITHUB_TOKEN/$GITHUB_TOKEN}"
+        log "INFO" "GitHub token applied to repository URL"
+    else
+        log "ERROR" "GitHub token not found in $LOCAL_CONFIG"
+        exit 1
+    fi
     
     # Generate the necessary files
     generate_server_setup

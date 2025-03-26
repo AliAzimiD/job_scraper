@@ -82,3 +82,7 @@ keys.yaml
 !uploads/.gitkeep
 !init-db/*.sql
 !config/*.yaml
+
+# Local configuration with sensitive data
+deploy.local.conf
+*.local.conf
