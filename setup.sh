@@ -43,6 +43,7 @@ SUPERSET_PORT=${SUPERSET_PORT:-8088}
 SUPERSET_USER=${SUPERSET_USER:-"admin"}
 SUPERSET_PASSWORD=${SUPERSET_PASSWORD:-"$(openssl rand -hex 8)"}
 SUPERSET_HOME=${SUPERSET_HOME:-"/opt/superset"}
+SUPERSET_DOMAIN=${SUPERSET_DOMAIN:-"superset.$DOMAIN_NAME"}
 
 # ===== Helper Functions =====
 
@@ -602,27 +603,95 @@ EOF
     
     # Set up SSL if requested
     if [[ "$USE_SSL" == "true" ]]; then
-        log "INFO" "Setting up SSL with Let's Encrypt"
-        
-        if [ -z "$DOMAIN_NAME" ]; then
-            log "ERROR" "Domain name not provided, cannot set up SSL"
-            log "INFO" "Please set DOMAIN_NAME and run this script again"
-            exit 1
-        fi
-        
-        if [ -z "$EMAIL" ]; then
-            log "ERROR" "Email not provided, cannot set up SSL"
-            log "INFO" "Please set EMAIL and run this script again"
-            exit 1
-        fi
-        
-        certbot --nginx -d "$DOMAIN_NAME" --non-interactive --agree-tos -m "$EMAIL" || {
-            log "WARNING" "Failed to obtain SSL certificate"
-            log "INFO" "You can try again later with: certbot --nginx"
-        }
+        setup_ssl
+    else
+        log "INFO" "SSL setup skipped as per configuration"
     fi
     
     log "SUCCESS" "Nginx set up"
+}
+
+# Set up SSL with Let's Encrypt
+setup_ssl() {
+    log "INFO" "Setting up SSL with Let's Encrypt"
+    
+    if [ -z "$DOMAIN_NAME" ]; then
+        log "ERROR" "Domain name not provided, cannot set up SSL"
+        log "INFO" "Please set DOMAIN_NAME and run the SSL setup again"
+        return 1
+    fi
+    
+    if [ -z "$EMAIL" ]; then
+        log "ERROR" "Email not provided, cannot set up SSL"
+        log "INFO" "Please set EMAIL and run the SSL setup again"
+        return 1
+    fi
+    
+    # Check if domain resolves to this server's IP
+    local server_ip=$(curl -s https://ifconfig.me || curl -s https://api.ipify.org)
+    local domain_ip=$(dig +short "$DOMAIN_NAME" A || host -t A "$DOMAIN_NAME" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' || nslookup "$DOMAIN_NAME" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | tail -1)
+    
+    if [[ -z "$domain_ip" ]]; then
+        log "WARNING" "Could not resolve domain $DOMAIN_NAME to an IP address"
+        log "INFO" "Please ensure your domain's DNS records are properly configured to point to this server"
+        log "INFO" "You can run the SSL setup later with: certbot --nginx -d $DOMAIN_NAME"
+        return 1
+    elif [[ "$domain_ip" != "$server_ip" ]]; then
+        log "WARNING" "Domain $DOMAIN_NAME resolves to $domain_ip, but this server's IP is $server_ip"
+        log "INFO" "Please ensure your domain's DNS records are properly configured to point to this server"
+        log "INFO" "You can run the SSL setup later with: certbot --nginx -d $DOMAIN_NAME"
+        return 1
+    fi
+    
+    # Try to obtain SSL certificate
+    certbot --nginx -d "$DOMAIN_NAME" --non-interactive --agree-tos -m "$EMAIL" || {
+        log "WARNING" "Failed to obtain SSL certificate"
+        log "INFO" "This could be due to:"
+        log "INFO" "  - DNS not fully propagated yet"
+        log "INFO" "  - Let's Encrypt rate limits (5 certificates per domain per week)"
+        log "INFO" "  - Network connectivity issues"
+        log "INFO" "  - Firewall blocking outbound connections"
+        log "INFO" "You can try again later with: certbot --nginx -d $DOMAIN_NAME"
+        return 1
+    }
+    
+    log "SUCCESS" "SSL certificate obtained successfully"
+    
+    # If Superset is enabled, also set up SSL for the Superset subdomain
+    if [[ "$USE_SUPERSET" == "true" ]]; then
+        log "INFO" "Setting up SSL for Superset subdomain"
+        setup_ssl_for_domain "${SUPERSET_DOMAIN:-"superset.$DOMAIN_NAME"}"
+    fi
+    
+    return 0
+}
+
+# Helper function to set up SSL for a specific domain
+setup_ssl_for_domain() {
+    local domain=$1
+    
+    log "INFO" "Setting up SSL for $domain with Let's Encrypt"
+    
+    if [ -z "$EMAIL" ]; then
+        log "ERROR" "Email not provided, cannot set up SSL"
+        log "INFO" "Please set EMAIL and run the SSL setup again"
+        return 1
+    fi
+    
+    # Try to obtain SSL certificate
+    certbot --nginx -d "$domain" --non-interactive --agree-tos -m "$EMAIL" || {
+        log "WARNING" "Failed to obtain SSL certificate for $domain"
+        log "INFO" "This could be due to:"
+        log "INFO" "  - DNS not fully propagated yet"
+        log "INFO" "  - Let's Encrypt rate limits (5 certificates per domain per week)"
+        log "INFO" "  - Network connectivity issues"
+        log "INFO" "  - Firewall blocking outbound connections"
+        log "INFO" "You can try again later with: certbot --nginx -d $domain"
+        return 1
+    }
+    
+    log "SUCCESS" "SSL certificate obtained successfully for $domain"
+    return 0
 }
 
 # Set up systemd service
@@ -1117,7 +1186,7 @@ EOF
         cat > "/etc/nginx/sites-available/superset" << EOF
 server {
     listen 80;
-    server_name superset.$DOMAIN_NAME;
+    server_name ${SUPERSET_DOMAIN:-"superset.$DOMAIN_NAME"};
 
     location / {
         proxy_pass http://127.0.0.1:$SUPERSET_PORT;
@@ -1157,24 +1226,7 @@ EOF
         
         # Set up SSL for Superset subdomain if SSL is enabled
         if [[ "$USE_SSL" == "true" ]]; then
-            log "INFO" "Setting up SSL for Superset with Let's Encrypt"
-            
-            if [ -z "$DOMAIN_NAME" ]; then
-                log "ERROR" "Domain name not provided, cannot set up SSL"
-                log "INFO" "Please set DOMAIN_NAME and run this script again"
-                exit 1
-            fi
-            
-            if [ -z "$EMAIL" ]; then
-                log "ERROR" "Email not provided, cannot set up SSL"
-                log "INFO" "Please set EMAIL and run this script again"
-                exit 1
-            fi
-            
-            certbot --nginx -d "superset.$DOMAIN_NAME" --non-interactive --agree-tos -m "$EMAIL" || {
-                log "WARNING" "Failed to obtain SSL certificate for Superset"
-                log "INFO" "You can try again later with: certbot --nginx -d superset.$DOMAIN_NAME"
-            }
+            setup_ssl_for_domain "${SUPERSET_DOMAIN:-"superset.$DOMAIN_NAME"}"
         fi
     fi
     
@@ -1193,7 +1245,7 @@ EOF
     cat > "$APP_HOME/credentials/superset_credentials.txt" << EOF
 Superset Admin Credentials
 ------------------------
-URL: http://superset.$DOMAIN_NAME
+URL: http://${SUPERSET_DOMAIN:-"superset.$DOMAIN_NAME"}
 Username: $SUPERSET_USER
 Password: $SUPERSET_PASSWORD
 Created: $(date)
@@ -1325,7 +1377,7 @@ EOF
         cat > "/etc/nginx/sites-available/superset" << EOF
 server {
     listen 80;
-    server_name superset.$DOMAIN_NAME;
+    server_name ${SUPERSET_DOMAIN:-"superset.$DOMAIN_NAME"};
 
     location / {
         proxy_pass http://127.0.0.1:$SUPERSET_PORT;
@@ -1362,6 +1414,11 @@ EOF
             log "ERROR" "Failed to restart Nginx"
             exit 1
         }
+        
+        # Set up SSL for Superset subdomain if SSL is enabled
+        if [[ "$USE_SSL" == "true" ]]; then
+            setup_ssl_for_domain "${SUPERSET_DOMAIN:-"superset.$DOMAIN_NAME"}"
+        fi
     fi
     
     log "SUCCESS" "Apache Superset (Docker) set up successfully"
@@ -1379,7 +1436,7 @@ EOF
     cat > "$APP_HOME/credentials/superset_credentials.txt" << EOF
 Superset Admin Credentials
 ------------------------
-URL: http://superset.$DOMAIN_NAME
+URL: http://${SUPERSET_DOMAIN:-"superset.$DOMAIN_NAME"}
 Username: $SUPERSET_USER
 Password: $SUPERSET_PASSWORD
 Created: $(date)
@@ -1422,7 +1479,7 @@ display_summary() {
     # Add Superset information to summary
     if [[ "$USE_SUPERSET" == "true" ]]; then
         log "INFO" "Analytics: Apache Superset"
-        log "INFO" "Superset URL: http://superset.$DOMAIN_NAME"
+        log "INFO" "Superset URL: http://${SUPERSET_DOMAIN:-"superset.$DOMAIN_NAME"}"
         log "INFO" "Superset credentials stored in: $APP_HOME/credentials/superset_credentials.txt"
         
         if [[ "$USE_DOCKER" == "true" ]]; then
@@ -1476,7 +1533,214 @@ display_summary() {
     log "SUCCESS" "Job Scraper Application has been successfully set up!"
 }
 
+# ===== Additional Helper Functions =====
+
+# Uninstall all components
+uninstall_application() {
+    section "Uninstalling Job Scraper Application"
+    
+    log "WARNING" "This will remove all components of the Job Scraper application"
+    echo -n "Are you sure you want to proceed with uninstallation? (y/n): "
+    read -r confirm
+    
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        log "INFO" "Uninstallation canceled"
+        exit 0
+    fi
+    
+    log "INFO" "Stopping and removing services"
+    
+    # Stop and remove application service
+    if systemctl is-active --quiet "$APP_NAME.service" 2>/dev/null; then
+        systemctl stop "$APP_NAME.service"
+        systemctl disable "$APP_NAME.service"
+        rm -f "/etc/systemd/system/$APP_NAME.service"
+    fi
+    
+    # Stop and remove Docker Compose service
+    if systemctl is-active --quiet "$APP_NAME-docker.service" 2>/dev/null; then
+        systemctl stop "$APP_NAME-docker.service"
+        systemctl disable "$APP_NAME-docker.service"
+        rm -f "/etc/systemd/system/$APP_NAME-docker.service"
+    fi
+    
+    # Stop and remove Superset service
+    if systemctl is-active --quiet "superset.service" 2>/dev/null; then
+        systemctl stop "superset.service"
+        systemctl disable "superset.service"
+        rm -f "/etc/systemd/system/superset.service"
+    fi
+    
+    # Remove Nginx configurations
+    if [ -f "/etc/nginx/sites-enabled/$APP_NAME" ]; then
+        rm -f "/etc/nginx/sites-enabled/$APP_NAME"
+    fi
+    
+    if [ -f "/etc/nginx/sites-available/$APP_NAME" ]; then
+        rm -f "/etc/nginx/sites-available/$APP_NAME"
+    fi
+    
+    if [ -f "/etc/nginx/sites-enabled/superset" ]; then
+        rm -f "/etc/nginx/sites-enabled/superset"
+    fi
+    
+    if [ -f "/etc/nginx/sites-available/superset" ]; then
+        rm -f "/etc/nginx/sites-available/superset"
+    fi
+    
+    # Reload systemd
+    systemctl daemon-reload
+    
+    # Restart Nginx if it's running
+    if systemctl is-active --quiet nginx; then
+        nginx -t && systemctl restart nginx
+    fi
+    
+    # Drop database if requested
+    echo -n "Do you want to remove the database? (y/n): "
+    read -r drop_db
+    
+    if [[ "$drop_db" == "y" || "$drop_db" == "Y" ]]; then
+        if [[ "$USE_DOCKER" != "true" ]]; then
+            log "INFO" "Dropping database: $DB_NAME"
+            su - postgres -c "dropdb $DB_NAME" 2>/dev/null || log "WARNING" "Failed to drop database"
+            
+            echo -n "Remove database user as well? (y/n): "
+            read -r drop_user
+            
+            if [[ "$drop_user" == "y" || "$drop_user" == "Y" ]]; then
+                log "INFO" "Dropping database user: $DB_USER"
+                su - postgres -c "dropuser $DB_USER" 2>/dev/null || log "WARNING" "Failed to drop database user"
+            fi
+        else
+            log "INFO" "Removing Docker volumes"
+            cd "$APP_HOME" && docker-compose down -v 2>/dev/null || log "WARNING" "Failed to remove Docker volumes"
+        fi
+    fi
+    
+    # Remove installation directory
+    echo -n "Remove the entire application directory ($APP_HOME)? (y/n): "
+    read -r remove_dir
+    
+    if [[ "$remove_dir" == "y" || "$remove_dir" == "Y" ]]; then
+        log "INFO" "Removing application directory: $APP_HOME"
+        rm -rf "$APP_HOME"
+    fi
+    
+    # Remove application user
+    echo -n "Remove the application user ($APP_USER)? (y/n): "
+    read -r remove_user
+    
+    if [[ "$remove_user" == "y" || "$remove_user" == "Y" ]]; then
+        log "INFO" "Removing application user: $APP_USER"
+        userdel -r "$APP_USER" 2>/dev/null || log "WARNING" "Failed to remove user"
+    fi
+    
+    # Remove the cloned repository if specified
+    echo -n "Remove the cloned repository directory (job-scraper)? (y/n): "
+    read -r remove_repo
+    
+    if [[ "$remove_repo" == "y" || "$remove_repo" == "Y" ]]; then
+        if [ -d "../job-scraper" ]; then
+            log "INFO" "Removing cloned repository: ../job-scraper"
+            rm -rf "../job-scraper"
+        else
+            log "INFO" "Repository directory not found at ../job-scraper"
+        fi
+    fi
+    
+    log "SUCCESS" "Uninstallation completed"
+    exit 0
+}
+
+# Interactive configuration
+interactive_config() {
+    section "Interactive Configuration"
+    
+    # Ask for domain name
+    if [[ "$USE_NGINX" == "true" ]]; then
+        echo -n "Enter the main domain name for the application [$DOMAIN_NAME]: "
+        read -r domain_input
+        if [ -n "$domain_input" ]; then
+            DOMAIN_NAME="$domain_input"
+        fi
+        
+        # Ask for SSL setup
+        echo -n "Do you want to set up SSL with Let's Encrypt? (y/n) [${USE_SSL}]: "
+        read -r ssl_input
+        if [[ "$ssl_input" == "y" || "$ssl_input" == "Y" ]]; then
+            USE_SSL="true"
+            
+            # Email for Let's Encrypt
+            echo -n "Enter email address for Let's Encrypt notifications [$EMAIL]: "
+            read -r email_input
+            if [ -n "$email_input" ]; then
+                EMAIL="$email_input"
+            fi
+        elif [[ "$ssl_input" == "n" || "$ssl_input" == "N" ]]; then
+            USE_SSL="false"
+        fi
+    fi
+    
+    # Ask for Superset domain
+    if [[ "$USE_SUPERSET" == "true" && "$USE_NGINX" == "true" ]]; then
+        local default_superset_domain="superset.$DOMAIN_NAME"
+        echo -n "Enter domain name for Superset [$default_superset_domain]: "
+        read -r superset_domain_input
+        if [ -n "$superset_domain_input" ]; then
+            SUPERSET_DOMAIN="$superset_domain_input"
+        else
+            SUPERSET_DOMAIN="$default_superset_domain"
+        fi
+    fi
+    
+    # Ask for database passwords
+    echo -n "Do you want to set custom database password? (y/n): "
+    read -r db_passwd_input
+    if [[ "$db_passwd_input" == "y" || "$db_passwd_input" == "Y" ]]; then
+        echo -n "Enter database password: "
+        read -rs DB_PASSWORD
+        echo ""
+    fi
+    
+    # Ask for Superset admin password
+    if [[ "$USE_SUPERSET" == "true" ]]; then
+        echo -n "Do you want to set custom Superset admin password? (y/n): "
+        read -r superset_passwd_input
+        if [[ "$superset_passwd_input" == "y" || "$superset_passwd_input" == "Y" ]]; then
+            echo -n "Enter Superset admin password: "
+            read -rs SUPERSET_PASSWORD
+            echo ""
+        fi
+    fi
+    
+    log "SUCCESS" "Configuration completed"
+}
+
+# Display detailed error information
+show_error_details() {
+    local service_name=$1
+    local log_file=$2
+    
+    log "ERROR" "Failed to set up $service_name"
+    log "INFO" "Check the log file for more details: $log_file"
+    log "INFO" "Last 10 lines of the log:"
+    echo "-----------------------------------"
+    if [ -f "$log_file" ]; then
+        tail -n 10 "$log_file"
+    else
+        echo "Log file not found: $log_file"
+    fi
+    echo "-----------------------------------"
+    log "INFO" "You can uninstall and try again with: $0 --uninstall"
+}
+
 # ===== Main Execution =====
+
+# Check for command line flags
+if [[ "$1" == "--uninstall" ]]; then
+    uninstall_application
+fi
 
 # Print banner
 cat << 'EOF'
@@ -1494,26 +1758,101 @@ echo
 log "INFO" "Starting Job Scraper Production Setup"
 log "INFO" "This script will set up the Job Scraper application for production use"
 
-# Run installation steps
-check_system_requirements
-update_system_packages
-install_dependencies
-setup_application_user
-setup_application_code
-setup_virtualenv
-configure_application
-setup_database
-setup_redis
-setup_nginx
-setup_systemd_service
-setup_monitoring
-setup_superset
-setup_backups
-setup_security
-verify_installation
-display_summary
+# Run interactive configuration
+interactive_config
 
-log "INFO" "Setup completed!"
-log "INFO" "Please save the Installation Summary for future reference"
+# Setup main log file
+MAIN_LOG_FILE="$PWD/setup_$(date +%Y%m%d%H%M%S).log"
+log "INFO" "Logging installation details to $MAIN_LOG_FILE"
+exec > >(tee -a "$MAIN_LOG_FILE") 2>&1
+
+# Run installation steps
+check_system_requirements || { 
+    show_error_details "system requirements check" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+update_system_packages || {
+    show_error_details "system packages update" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+install_dependencies || {
+    show_error_details "dependencies installation" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+setup_application_user || {
+    show_error_details "application user setup" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+setup_application_code || {
+    show_error_details "application code setup" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+setup_virtualenv || {
+    show_error_details "virtual environment setup" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+configure_application || {
+    show_error_details "application configuration" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+setup_database || {
+    show_error_details "database setup" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+setup_redis || {
+    show_error_details "Redis setup" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+setup_nginx || {
+    show_error_details "Nginx setup" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+setup_systemd_service || {
+    show_error_details "systemd service setup" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+setup_monitoring || {
+    show_error_details "monitoring setup" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+setup_superset || {
+    show_error_details "Superset setup" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+setup_backups || {
+    show_error_details "backups setup" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+setup_security || {
+    show_error_details "security setup" "$MAIN_LOG_FILE"
+    exit 1
+}
+
+verify_installation || {
+    show_error_details "installation verification" "$MAIN_LOG_FILE"
+    log "WARNING" "Installation completed with verification errors"
+    log "INFO" "You can run the uninstall script to clean up: $0 --uninstall"
+    display_summary
+    exit 1
+}
+
+# If we got here, everything was successful
+display_summary
+log "SUCCESS" "Setup completed successfully!"
+log "INFO" "If you need to uninstall later, run: $0 --uninstall"
 
 exit 0 

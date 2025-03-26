@@ -598,24 +598,9 @@ EOF
     
     # Set up SSL if requested
     if [[ "$USE_SSL" == "true" ]]; then
-        log "INFO" "Setting up SSL with Let's Encrypt"
-        
-        if [ -z "$DOMAIN_NAME" ]; then
-            log "ERROR" "Domain name not provided, cannot set up SSL"
-            log "INFO" "Please set DOMAIN_NAME and run this script again"
-            exit 1
-        fi
-        
-        if [ -z "$EMAIL" ]; then
-            log "ERROR" "Email not provided, cannot set up SSL"
-            log "INFO" "Please set EMAIL and run this script again"
-            exit 1
-        }
-        
-        certbot --nginx -d "$DOMAIN_NAME" --non-interactive --agree-tos -m "$EMAIL" || {
-            log "WARNING" "Failed to obtain SSL certificate"
-            log "INFO" "You can try again later with: certbot --nginx"
-        }
+        setup_ssl
+    else
+        log "INFO" "SSL setup skipped as per configuration"
     fi
     
     log "SUCCESS" "Nginx set up"
@@ -943,6 +928,89 @@ display_summary() {
     log "INFO" "Manual backup: sudo -u $APP_USER $APP_HOME/scripts/backup.sh"
     
     log "SUCCESS" "Job Scraper Application has been successfully set up!"
+}
+
+# Set up SSL with Let's Encrypt
+setup_ssl() {
+    log "INFO" "Setting up SSL with Let's Encrypt"
+    
+    if [ -z "$DOMAIN_NAME" ]; then
+        log "ERROR" "Domain name not provided, cannot set up SSL"
+        log "INFO" "Please set DOMAIN_NAME and run the SSL setup again"
+        return 1
+    fi
+    
+    if [ -z "$EMAIL" ]; then
+        log "ERROR" "Email not provided, cannot set up SSL"
+        log "INFO" "Please set EMAIL and run the SSL setup again"
+        return 1
+    fi
+    
+    # Check if domain resolves to this server's IP
+    local server_ip=$(curl -s https://ifconfig.me || curl -s https://api.ipify.org)
+    local domain_ip=$(dig +short "$DOMAIN_NAME" A || host -t A "$DOMAIN_NAME" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' || nslookup "$DOMAIN_NAME" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | tail -1)
+    
+    if [[ -z "$domain_ip" ]]; then
+        log "WARNING" "Could not resolve domain $DOMAIN_NAME to an IP address"
+        log "INFO" "Please ensure your domain's DNS records are properly configured to point to this server"
+        log "INFO" "You can run the SSL setup later with: certbot --nginx -d $DOMAIN_NAME"
+        return 1
+    elif [[ "$domain_ip" != "$server_ip" ]]; then
+        log "WARNING" "Domain $DOMAIN_NAME resolves to $domain_ip, but this server's IP is $server_ip"
+        log "INFO" "Please ensure your domain's DNS records are properly configured to point to this server"
+        log "INFO" "You can run the SSL setup later with: certbot --nginx -d $DOMAIN_NAME"
+        return 1
+    fi
+    
+    # Try to obtain SSL certificate
+    certbot --nginx -d "$DOMAIN_NAME" --non-interactive --agree-tos -m "$EMAIL" || {
+        log "WARNING" "Failed to obtain SSL certificate"
+        log "INFO" "This could be due to:"
+        log "INFO" "  - DNS not fully propagated yet"
+        log "INFO" "  - Let's Encrypt rate limits (5 certificates per domain per week)"
+        log "INFO" "  - Network connectivity issues"
+        log "INFO" "  - Firewall blocking outbound connections"
+        log "INFO" "You can try again later with: certbot --nginx -d $DOMAIN_NAME"
+        return 1
+    }
+    
+    log "SUCCESS" "SSL certificate obtained successfully"
+    
+    # If Superset is enabled, also set up SSL for the Superset subdomain
+    if [[ "$USE_SUPERSET" == "true" ]]; then
+        log "INFO" "Setting up SSL for Superset subdomain"
+        setup_ssl_for_domain "superset.$DOMAIN_NAME"
+    fi
+    
+    return 0
+}
+
+# Helper function to set up SSL for a specific domain
+setup_ssl_for_domain() {
+    local domain=$1
+    
+    log "INFO" "Setting up SSL for $domain with Let's Encrypt"
+    
+    if [ -z "$EMAIL" ]; then
+        log "ERROR" "Email not provided, cannot set up SSL"
+        log "INFO" "Please set EMAIL and run the SSL setup again"
+        return 1
+    fi
+    
+    # Try to obtain SSL certificate
+    certbot --nginx -d "$domain" --non-interactive --agree-tos -m "$EMAIL" || {
+        log "WARNING" "Failed to obtain SSL certificate for $domain"
+        log "INFO" "This could be due to:"
+        log "INFO" "  - DNS not fully propagated yet"
+        log "INFO" "  - Let's Encrypt rate limits (5 certificates per domain per week)"
+        log "INFO" "  - Network connectivity issues"
+        log "INFO" "  - Firewall blocking outbound connections"
+        log "INFO" "You can try again later with: certbot --nginx -d $domain"
+        return 1
+    }
+    
+    log "SUCCESS" "SSL certificate obtained successfully for $domain"
+    return 0
 }
 
 # ===== Main Execution =====
