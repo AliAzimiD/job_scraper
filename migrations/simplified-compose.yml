@@ -1,0 +1,63 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: job_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+      - ./migrations:/docker-entrypoint-migrations
+    environment:
+      - POSTGRES_DB=jobsdb
+      - POSTGRES_USER=jobuser
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+    secrets:
+      - db_password
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobuser -d jobsdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Migrator service to run migrations
+  migrator:
+    image: python:3.11-slim
+    container_name: job_migrator
+    volumes:
+      - ./migrations:/migrations
+      - ./src:/src
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=jobsdb
+      - POSTGRES_USER=jobuser
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+    secrets:
+      - db_password
+    depends_on:
+      db:
+        condition: service_healthy
+    working_dir: /
+    command: >
+      bash -c "
+        apt-get update && apt-get install -y postgresql-client &&
+        pip install asyncpg &&
+        echo 'Running migrations manually...' &&
+        PGPASSWORD=$(cat /run/secrets/db_password) psql -h db -U jobuser -d jobsdb -f /migrations/01_create_normalized_schema.sql &&
+        PGPASSWORD=$(cat /run/secrets/db_password) psql -h db -U jobuser -d jobsdb -f /migrations/02_migrate_data.sql &&
+        PGPASSWORD=$(cat /run/secrets/db_password) psql -h db -U jobuser -d jobsdb -f /migrations/03_create_materialized_views.sql &&
+        PGPASSWORD=$(cat /run/secrets/db_password) psql -h db -U jobuser -d jobsdb -f /migrations/04_setup_partitioning.sql &&
+        PGPASSWORD=$(cat /run/secrets/db_password) psql -h db -U jobuser -d jobsdb -f /migrations/05_modify_database_access.sql &&
+        echo 'Migrations completed successfully'
+      "
+
+volumes:
+  postgres_data:
+    name: job_postgres_data
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt 

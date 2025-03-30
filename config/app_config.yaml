@@ -1,0 +1,15 @@
+app:
+  environment: production
+  enable_health_check: true
+  health_port: 8081
+  log_level: INFO
+database:
+  connection_string: postgresql://jobuser:jobuser_password@db:5432/jobsdb
+  schema: public
+  pool_size: 10
+scraper:
+  config_path: config/api_config.yaml
+  save_dir: job_data
+  batch_size: 100
+  max_retries: 3
+  retry_delay: 5

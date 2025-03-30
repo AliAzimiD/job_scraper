@@ -1,6 +1,40 @@
 version: '3.9'
 
 services:
+  # Job scraper application
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: job_scraper
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SCRAPER_ENV: production
+      TZ: Asia/Tehran
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: jobuser
+      DB_NAME: jobsdb
+      DB_PASSWORD: jobuser_password
+      ENABLE_CRON: "true"
+    volumes:
+      - ./job_data:/app/data
+      - ./config:/app/config
+      - ./migrations:/app/migrations
+    networks:
+      - scraper-network
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   # Database service
   db:
     image: postgres:15-alpine
@@ -13,8 +47,8 @@ services:
       TZ: Asia/Tehran
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - /root/karchi/job_scraper/migrations:/docker-entrypoint-migrations
-      - /root/karchi/job_scraper/init-db:/docker-entrypoint-initdb.d
+      - ./migrations:/docker-entrypoint-migrations
+      - ./init-db:/docker-entrypoint-initdb.d
     networks:
       - scraper-network
     healthcheck:
@@ -57,20 +91,21 @@ services:
       timeout: 5s
       retries: 5
 
-  # Superset (analytics dashboard)
+  # Superset (analytics dashboard) with fixed command formatting
   superset:
     build:
-      context: /root/karchi/job_scraper/superset
+      context: ./superset
     container_name: job_superset
     restart: unless-stopped
     depends_on:
       - db
       - redis
+    # Using YAML pipe syntax for the command to avoid interpolation issues
     command: |
       bash -c "superset db upgrade && 
       superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password admin_password && 
       superset init && 
-      superset run --host=0.0.0.0 -p 8088 --with-threads --reload --debugger"
+      superset run -p 8088 --with-threads --reload --debugger"
     environment:
       SUPERSET_ENV: production
       DB_HOST: db
@@ -86,40 +121,6 @@ services:
       - scraper-network
     ports:
       - "8088:8088"
-
-  # Job scraper application
-  scraper:
-    build:
-      context: /root/karchi/job_scraper
-      dockerfile: Dockerfile
-    container_name: job_scraper
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      SCRAPER_ENV: production
-      TZ: Asia/Tehran
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_USER: jobuser
-      DB_NAME: jobsdb
-      DB_PASSWORD: jobuser_password
-      ENABLE_CRON: "true"
-    volumes:
-      - /root/karchi/job_scraper/job_data:/app/data
-      - /root/karchi/job_scraper/config:/app/config
-      - /root/karchi/job_scraper/migrations:/app/migrations
-    networks:
-      - scraper-network
-    ports:
-      - "8081:8081"
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
 volumes:
   postgres_data:

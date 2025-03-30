@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  scraper:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: job_scraper_dev
+    volumes:
+      - .:/app
+      - ./job_data:/app/job_data
+    environment:
+      - SCRAPER_ENV=development
+      - PYTHONPATH=/app
+      - TZ=UTC
+    command: python main.py
+    ports:
+      - "8888:8888"  # For debugging if needed
+    restart: "no"

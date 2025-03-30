@@ -1,0 +1,207 @@
+version: '3.9'
+
+services:
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: job_scraper
+    volumes:
+      - ./job_data:/app/job_data
+      - ./config:/app/config
+      - ./migrations:/app/migrations  # Mount migrations directory
+    environment:
+      - SCRAPER_ENV=production
+      - TZ=Asia/Tehran
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=jobsdb
+      - POSTGRES_USER=jobuser
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+      - ENABLE_CRON=true
+      - RUN_ON_START=true
+      - LOG_LEVEL=INFO
+      - DB_SCHEMA_VERSION=2  # Set desired schema version
+    secrets:
+      - db_password
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 1G
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - scraper-network
+
+  db:
+    image: postgres:15-alpine
+    container_name: job_db
+    # Explicitly define each volume separately to avoid ContainerConfig issues
+    volumes:
+      - type: volume
+        source: postgres_data
+        target: /var/lib/postgresql/data
+      - type: bind
+        source: ./init-db
+        target: /docker-entrypoint-initdb.d
+      - type: bind
+        source: ./migrations
+        target: /docker-entrypoint-migrations
+    environment:
+      - POSTGRES_DB=jobsdb
+      - POSTGRES_USER=jobuser
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+      - POSTGRES_INITDB_ARGS=--data-checksums
+    secrets:
+      - db_password
+    ports:
+      - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobuser -d jobsdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scraper-network
+    shm_size: 256m
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: job_pgadmin
+    volumes:
+      - type: volume
+        source: pgadmin_data
+        target: /var/lib/pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=YourSecurePgAdminPassword
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    ports:
+      - "5050:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - scraper-network
+    healthcheck:
+      test: ["CMD", "wget", "-O", "-", "http://localhost/misc/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  superset:
+    build:
+      context: .
+      dockerfile: Dockerfile.superset
+    container_name: job_superset
+    depends_on:
+      db:
+        condition: service_healthy
+    secrets:
+      - db_password
+    environment:
+      - SUPERSET_SECRET_KEY=G8vf9dyYhS4DTZXrQMbK6EwLCpnP3Vm7
+    ports:
+      - "8088:8088"
+    volumes:
+      - type: volume
+        source: superset_home
+        target: /app/superset_home
+    command: >
+      bash -c "
+        DB_PASS=$$(cat /run/secrets/db_password) &&
+        export SQLALCHEMY_DATABASE_URI=\"postgresql+psycopg2://jobuser:$$DB_PASS@db:5432/jobsdb\" &&
+        superset fab create-admin --username admin --password admin --firstname Admin --lastname User --email admin@example.com &&
+        superset db upgrade &&
+        superset init &&
+        superset run -p 8088 -h 0.0.0.0 --with-threads --reload --debugger
+      "
+    restart: unless-stopped
+    networks:
+      - scraper-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 1G
+
+  # New service for migrations (run on demand)
+  migrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: job_migrator
+    profiles:
+      - migrations  # This means it only runs when explicitly requested
+    volumes:
+      - type: bind
+        source: ./migrations
+        target: /app/migrations
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=jobsdb
+      - POSTGRES_USER=jobuser
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+      - LOG_LEVEL=INFO
+    secrets:
+      - db_password
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      bash -c "
+        echo 'Running database migrations...' &&
+        python -m src.run_migrations
+      "
+    networks:
+      - scraper-network
+
+volumes:
+  postgres_data:
+    name: job_postgres_data
+  pgadmin_data:
+    name: job_pgadmin_data
+  superset_home:
+    name: job_superset_home
+
+networks:
+  scraper-network:
+    driver: bridge
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  pgadmin_password:
+    file: ./secrets/pgadmin_password.txt
+  pgadmin_email:
+    file: ./secrets/pgadmin_email.txt 
