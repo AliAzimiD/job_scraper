@@ -9,7 +9,7 @@ services:
     environment:
       POSTGRES_USER: jobuser
       POSTGRES_DB: jobsdb
-      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_PASSWORD: jobuser_password  # Use direct password for simplicity
       TZ: Asia/Tehran
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -25,8 +25,6 @@ services:
       start_period: 10s
     ports:
       - "5432:5432"
-    secrets:
-      - db_password
 
   # PgAdmin (database administration tool)
   pgadmin:
@@ -37,17 +35,14 @@ services:
       db:
         condition: service_healthy
     environment:
-      PGADMIN_DEFAULT_EMAIL_FILE: /run/secrets/pgadmin_email
-      PGADMIN_DEFAULT_PASSWORD_FILE: /run/secrets/pgadmin_password
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin_password  # Use direct password for simplicity
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     networks:
       - scraper-network
     ports:
       - "5050:80"
-    secrets:
-      - pgadmin_email
-      - pgadmin_password
 
   # Redis service required for Superset
   redis:
@@ -73,7 +68,7 @@ services:
       - redis
     command: |
       bash -c "superset db upgrade && 
-      superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password-stdin < /run/secrets/superset_admin_password && 
+      echo 'admin_password' | superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password-stdin && 
       superset init && 
       superset run --host=0.0.0.0 -p 8088 --with-threads --reload --debugger"
     environment:
@@ -82,19 +77,15 @@ services:
       DB_PORT: 5432
       DB_USER: jobuser
       DB_NAME: jobsdb
-      DB_PASSWORD_FILE: /run/secrets/db_password
+      DB_PASSWORD: jobuser_password  # Use direct password for simplicity
       REDIS_HOST: redis
-      SUPERSET_SECRET_KEY_FILE: /run/secrets/superset_secret_key
+      SUPERSET_SECRET_KEY: superset_secret_key_value  # Use direct value for simplicity
     volumes:
       - superset_home:/app/superset_home
     networks:
       - scraper-network
     ports:
       - "8088:8088"
-    secrets:
-      - db_password
-      - superset_secret_key
-      - superset_admin_password
 
   # Job scraper application
   scraper:
@@ -113,8 +104,8 @@ services:
       DB_PORT: 5432
       DB_USER: jobuser
       DB_NAME: jobsdb
-      DB_PASSWORD_FILE: /run/secrets/db_password
-      ENABLE_CRON: "true"
+      DB_PASSWORD: jobuser_password  # Use direct password for simplicity
+      ENABLE_CRON: "true"  # Keep the container running
     volumes:
       - ./job_data:/app/data
       - ./config:/app/config
@@ -130,8 +121,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    secrets:
-      - db_password
 
   # Admin Dashboard service
   admin:
@@ -150,7 +139,8 @@ services:
       DB_PORT: 5432
       DB_USER: jobuser
       DB_NAME: jobsdb
-      DB_PASSWORD_FILE: /run/secrets/db_password
+      DB_PASSWORD: jobuser_password  # Use direct password for simplicity
+      ENABLE_CRON: "true"  # Keep the container running
     volumes:
       - ./src:/app/src
       - ./public:/app/public
@@ -161,15 +151,13 @@ services:
       - scraper-network
     ports:
       - "8081:8081"
-    command: python3 run_admin_dashboard.py --host 0.0.0.0 --port 8081
+    command: python3 -m uvicorn src.main:app --host 0.0.0.0 --port 8081 --log-level debug
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-    secrets:
-      - db_password
 
 volumes:
   postgres_data:
@@ -182,15 +170,3 @@ volumes:
 networks:
   scraper-network:
     name: job_scraper_network
-
-secrets:
-  db_password:
-    file: ./secrets/db_password.txt
-  pgadmin_email:
-    file: ./secrets/pgadmin_email.txt
-  pgadmin_password:
-    file: ./secrets/pgadmin_password.txt
-  superset_secret_key:
-    file: ./secrets/superset_secret_key.txt
-  superset_admin_password:
-    file: ./secrets/superset_admin_password.txt
