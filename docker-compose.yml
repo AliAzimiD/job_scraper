@@ -9,12 +9,12 @@ services:
     environment:
       POSTGRES_USER: jobuser
       POSTGRES_DB: jobsdb
-      POSTGRES_PASSWORD: jobuser_password
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       TZ: Asia/Tehran
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - /root/karchi/job_scraper/migrations:/docker-entrypoint-migrations
-      - /root/karchi/job_scraper/init-db:/docker-entrypoint-initdb.d
+      - ./migrations:/docker-entrypoint-migrations
+      - ./init-db:/docker-entrypoint-initdb.d
     networks:
       - scraper-network
     healthcheck:
@@ -25,6 +25,8 @@ services:
       start_period: 10s
     ports:
       - "5432:5432"
+    secrets:
+      - db_password
 
   # PgAdmin (database administration tool)
   pgadmin:
@@ -35,14 +37,17 @@ services:
       db:
         condition: service_healthy
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: admin_password
+      PGADMIN_DEFAULT_EMAIL_FILE: /run/secrets/pgadmin_email
+      PGADMIN_DEFAULT_PASSWORD_FILE: /run/secrets/pgadmin_password
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     networks:
       - scraper-network
     ports:
       - "5050:80"
+    secrets:
+      - pgadmin_email
+      - pgadmin_password
 
   # Redis service required for Superset
   redis:
@@ -60,7 +65,7 @@ services:
   # Superset (analytics dashboard)
   superset:
     build:
-      context: /root/karchi/job_scraper/superset
+      context: ./superset
     container_name: job_superset
     restart: unless-stopped
     depends_on:
@@ -68,7 +73,7 @@ services:
       - redis
     command: |
       bash -c "superset db upgrade && 
-      superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password admin_password && 
+      superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password-stdin < /run/secrets/superset_admin_password && 
       superset init && 
       superset run --host=0.0.0.0 -p 8088 --with-threads --reload --debugger"
     environment:
@@ -77,20 +82,24 @@ services:
       DB_PORT: 5432
       DB_USER: jobuser
       DB_NAME: jobsdb
-      DB_PASSWORD: jobuser_password
+      DB_PASSWORD_FILE: /run/secrets/db_password
       REDIS_HOST: redis
-      SUPERSET_SECRET_KEY: "superset_secret_key_value"
+      SUPERSET_SECRET_KEY_FILE: /run/secrets/superset_secret_key
     volumes:
       - superset_home:/app/superset_home
     networks:
       - scraper-network
     ports:
       - "8088:8088"
+    secrets:
+      - db_password
+      - superset_secret_key
+      - superset_admin_password
 
   # Job scraper application
   scraper:
     build:
-      context: /root/karchi/job_scraper
+      context: .
       dockerfile: Dockerfile
     container_name: job_scraper
     restart: unless-stopped
@@ -104,22 +113,63 @@ services:
       DB_PORT: 5432
       DB_USER: jobuser
       DB_NAME: jobsdb
-      DB_PASSWORD: jobuser_password
+      DB_PASSWORD_FILE: /run/secrets/db_password
       ENABLE_CRON: "true"
     volumes:
-      - /root/karchi/job_scraper/job_data:/app/data
-      - /root/karchi/job_scraper/config:/app/config
-      - /root/karchi/job_scraper/migrations:/app/migrations
+      - ./job_data:/app/data
+      - ./config:/app/config
+      - ./migrations:/app/migrations
+      - ./logs:/app/logs
     networks:
       - scraper-network
     ports:
-      - "8081:8081"
+      - "8082:8081"  # Changed to 8082 to avoid conflicts with admin dashboard
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    secrets:
+      - db_password
+
+  # Admin Dashboard service
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: job_admin
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ADMIN_MODE: "true"
+      TZ: Asia/Tehran
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: jobuser
+      DB_NAME: jobsdb
+      DB_PASSWORD_FILE: /run/secrets/db_password
+    volumes:
+      - ./src:/app/src
+      - ./public:/app/public
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./scripts:/app/scripts
+    networks:
+      - scraper-network
+    ports:
+      - "8081:8081"
+    command: python3 run_admin_dashboard.py --host 0.0.0.0 --port 8081
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    secrets:
+      - db_password
 
 volumes:
   postgres_data:
@@ -132,3 +182,15 @@ volumes:
 networks:
   scraper-network:
     name: job_scraper_network
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  pgadmin_email:
+    file: ./secrets/pgadmin_email.txt
+  pgadmin_password:
+    file: ./secrets/pgadmin_password.txt
+  superset_secret_key:
+    file: ./secrets/superset_secret_key.txt
+  superset_admin_password:
+    file: ./secrets/superset_admin_password.txt

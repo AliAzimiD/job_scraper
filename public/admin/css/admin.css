@@ -1,0 +1,142 @@
+/* Admin Dashboard CSS */
+
+/* Main */
+.dashboard-container {
+    padding: 20px;
+}
+
+/* Cards */
+.card {
+    transition: all 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+/* Status indicators */
+.status-active {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        background-color: #d1e7dd;
+    }
+    50% {
+        background-color: #b1d4c4;
+    }
+    100% {
+        background-color: #d1e7dd;
+    }
+}
+
+/* Log viewer */
+.logs {
+    position: relative;
+    overflow-y: auto;
+    max-height: 300px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    background-color: #212529;
+    color: #f8f9fa;
+    padding: 10px;
+    border-radius: 5px;
+}
+
+.log-entry {
+    margin: 0;
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.log-entry:last-child {
+    border-bottom: none;
+}
+
+/* Form styling */
+.config-form label {
+    font-weight: bold;
+}
+
+.config-form fieldset {
+    margin-bottom: 15px;
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+    padding: 15px;
+}
+
+.config-form legend {
+    width: auto;
+    padding: 0 10px;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .card {
+        margin-bottom: 20px;
+    }
+}
+
+/* Table styling */
+.table thead th {
+    background-color: #f8f9fa;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.table tbody tr:hover {
+    background-color: rgba(0,123,255,0.05);
+}
+
+/* Button effects */
+.btn {
+    transition: all 0.2s;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.btn:active {
+    transform: translateY(1px);
+    box-shadow: none;
+}
+
+/* Loading animation */
+.loading {
+    display: inline-block;
+    position: relative;
+    width: 80px;
+    height: 80px;
+}
+
+.loading:after {
+    content: " ";
+    display: block;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    margin-top: -20px;
+    margin-left: -20px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 6px solid #f3f3f3;
+    border-color: #007bff transparent #007bff transparent;
+    animation: loading 1.2s linear infinite;
+}
+
+@keyframes loading {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+} 

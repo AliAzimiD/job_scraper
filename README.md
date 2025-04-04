@@ -208,3 +208,292 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Contributing
 
 Contributions are welcome! Please see CONTRIBUTING.md for details on how to contribute.
+
+# Job Scraper Admin Dashboard
+
+A comprehensive admin dashboard for monitoring and controlling the Job Scraper application.
+
+## Features
+
+- Real-time monitoring of scraping status and statistics
+- View and filter scraper logs
+- Configure scraper settings through a user-friendly interface
+- Start and stop scraping operations manually
+- View recent job listings collected by the scraper
+
+## Setup Instructions
+
+### Prerequisites
+
+- Python 3.6 or higher
+- FastAPI
+- Uvicorn
+- Python-multipart
+
+### Installation
+
+1. Clone the repository (if you haven't already):
+   ```bash
+   git clone [your-repository-url]
+   cd job_scraper
+   ```
+
+2. Run the setup script:
+   ```bash
+   ./scripts/setup_admin.sh
+   ```
+
+   This script will:
+   - Create necessary directories
+   - Install required dependencies
+   - Set up default admin UI files if they don't exist
+
+3. If you prefer to install dependencies manually:
+   ```bash
+   pip install fastapi uvicorn python-multipart
+   ```
+
+### Running the Dashboard
+
+1. Start the FastAPI server:
+   ```bash
+   python3 src/main.py
+   ```
+
+2. Access the admin dashboard in your browser:
+   ```
+   http://localhost:8000/admin
+   ```
+
+## Dashboard Sections
+
+### Status Panel
+- Shows if scraping is active or idle
+- Displays the last scrape time
+- Shows total jobs collected
+- Provides buttons to start and stop scraping operations
+
+### Recent Jobs Panel
+- Displays the most recent jobs collected by the scraper
+- Shows job title, company, location, and date
+
+### Configuration Panel
+- View and update scraper configuration settings
+- Changes are applied immediately
+
+### Logs Panel
+- Real-time view of scraper logs
+- Auto-refreshes to show the latest logs
+
+## API Endpoints
+
+The dashboard interacts with the following API endpoints:
+
+- `GET /api/stats` - Get current scraper statistics
+- `GET /api/logs` - Get scraper logs
+- `GET /api/config` - Get current configuration
+- `POST /api/config` - Update configuration
+- `POST /api/scrape/start` - Start a scraping job
+- `POST /api/scrape/stop` - Stop the current scraping job
+
+## Customization
+
+You can customize the dashboard by modifying the following files:
+
+- `/public/admin/index.html` - Main dashboard structure
+- `/public/admin/css/admin.css` - Dashboard styling
+- `/public/admin/js/admin.js` - Dashboard functionality
+
+## Troubleshooting
+
+If you encounter issues with the admin dashboard:
+
+1. Ensure the FastAPI server is running
+2. Check that all required packages are installed
+3. Verify that the admin routes are properly configured in `main.py`
+4. Check the browser console for JavaScript errors
+5. Examine the server logs for API errors
+
+## License
+
+[Your License Information]
+
+## Admin Dashboard
+
+The Job Scraper now includes a comprehensive admin dashboard for monitoring and controlling the scraping system.
+
+### Dashboard Features
+
+- Real-time monitoring of scraping status and statistics
+- View and filter scraper logs
+- Configure scraper settings through a user-friendly interface
+- Start and stop scraping operations manually
+- View recent job listings collected by the scraper
+
+### Running the Admin Dashboard
+
+#### Method 1: Direct Execution
+
+```bash
+# Using the dedicated script
+./run_admin_dashboard.py
+
+# Or with options
+./run_admin_dashboard.py --port 8082 --reload
+```
+
+#### Method 2: Docker
+
+```bash
+# Using the Docker script
+./scripts/run_admin_docker.sh
+```
+
+### Accessing the Dashboard
+
+Once running, access the dashboard at:
+
+```
+http://localhost:8081/admin
+```
+
+The dashboard will show the current status of the scraper, recent logs, and configuration options.
+
+### Dashboard Setup
+
+If you need to set up the dashboard manually:
+
+```bash
+./scripts/setup_admin.sh
+```
+
+For more detailed information, see [the admin dashboard documentation](docs/admin_dashboard.md).
+
+# Job Scraper with Admin Dashboard
+
+A powerful job scraping application with an administrative dashboard for monitoring and controlling the scraping process.
+
+## Features
+
+- Web-based admin dashboard for monitoring and controlling job scraping
+- Configurable job sources and scraping schedule
+- Real-time logs and statistics
+- RESTful API for programmatic access
+- Containerized deployment support
+
+## Installation
+
+### Prerequisites
+
+- Python 3.6+
+- pip (Python package manager)
+- Docker (optional, for containerized deployment)
+
+### Standard Installation
+
+1. Clone the repository:
+   ```
+   git clone <repository-url>
+   cd job_scraper
+   ```
+
+2. Install the required dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+3. Set up the admin dashboard:
+   ```
+   chmod +x scripts/setup_admin.sh
+   ./scripts/setup_admin.sh
+   ```
+
+## Running the Application
+
+### Running the Admin Dashboard
+
+To start the admin dashboard, run:
+
+```
+python run_admin_dashboard.py
+```
+
+By default, the dashboard will be available at `http://localhost:8081/admin`
+
+Options:
+- `--host`: Host to bind the server (default: 0.0.0.0)
+- `--port`: Port to bind the server (default: 8081)
+- `--reload`: Enable auto-reload for development (default: False)
+
+Example with custom port:
+```
+python run_admin_dashboard.py --port 8089
+```
+
+### Running with Docker
+
+1. Build and start the containers:
+   ```
+   docker-compose up -d
+   ```
+
+2. Access the admin dashboard at `http://localhost:8081/admin`
+
+## API Endpoints
+
+The application exposes the following API endpoints:
+
+- `GET /api/stats` - Get current scraper statistics
+- `GET /api/config` - Get current configuration
+- `POST /api/config` - Update configuration
+- `GET /api/logs` - Get scraper logs
+- `POST /api/control/start` - Start the scraper
+- `POST /api/control/stop` - Stop the scraper
+
+## Development
+
+### Testing
+
+Run the tests with:
+
+```
+python -m pytest
+```
+
+### Test Server
+
+For quick testing of the API, you can use the test server:
+
+```
+python test_server.py
+```
+
+This will start a minimal FastAPI server on port 8089.
+
+## Troubleshooting
+
+### Port Already in Use
+
+If you encounter a "Port already in use" error, either:
+1. Choose a different port: `python run_admin_dashboard.py --port 8090`
+2. Find and stop the process using the port:
+   ```
+   netstat -tulpn | grep <port>
+   kill <pid>
+   ```
+
+### Static Files Not Loading
+
+If the admin dashboard UI isn't loading properly, ensure the setup script was run:
+```
+chmod +x scripts/setup_admin.sh
+./scripts/setup_admin.sh
+```
+
+## License
+
+[MIT License](LICENSE)
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.

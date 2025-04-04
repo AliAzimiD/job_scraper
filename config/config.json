@@ -1,0 +1,15 @@
+{
+  "sources": [
+    {
+      "name": "example_source",
+      "url": "https://example.com/jobs",
+      "enabled": true
+    }
+  ],
+  "schedule": "0 0 * * *",
+  "enabled": false,
+  "scrape_interval_hours": 24,
+  "max_pages_per_source": 5,
+  "timeout_seconds": 30,
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+} 

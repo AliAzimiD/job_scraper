@@ -1,33 +1,27 @@
+# Job Scraper Dependencies
+
 # Core dependencies
-aiohttp==3.9.3
-pandas==2.2.0
-pyyaml==6.0.1
-tenacity==8.2.3
-pyarrow==15.0.0  # for parquet support
+fastapi==0.100.0
+uvicorn==0.23.0
+python-multipart==0.0.6
+jinja2==3.1.2
+pydantic==2.1.1
+requests==2.31.0
 
-# Database dependencies
-psycopg2-binary==2.9.9  # PostgreSQL adapter
-sqlalchemy==2.0.27  # SQL toolkit and ORM
-asyncpg==0.29.0  # Async PostgreSQL driver
-alembic==1.13.1  # Database migrations
+# Database
+sqlalchemy==2.0.20
+alembic==1.11.3
 
-# Monitoring and health check
-psutil==5.9.8  # System monitoring
-prometheus-client==0.19.0  # Metrics collection
-aiohttp-metrics # Metrics for aiohttp
+# Scraping
+beautifulsoup4==4.12.2
+lxml==4.9.3
 
-# Utilities
-python-dotenv==1.0.1  # Environment variable management
-pydantic==2.6.1  # Data validation
-ujson==5.9.0  # Fast JSON parsing
-aiologger==0.7.0  # Async logging
-backoff==2.2.1  # Exponential backoff
-cachetools==5.3.2  # Caching utilities
+# Testing
+pytest==7.4.0
+requests-mock==1.11.0
+pytest-asyncio==0.21.1
 
-# Development dependencies (optional)
-pytest==7.4.4
-pytest-asyncio==0.23.4
-pytest-cov==4.1.0
-black==23.12.1
-isort==5.13.2
-mypy==1.7.1
+# Utils
+python-dateutil==2.8.2
+tqdm==4.66.1
+colorlog==6.7.0
