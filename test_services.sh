@@ -1,0 +1,1 @@
+#!/bin/bash\necho "Testing if services are accessible..."\n\necho -n "Test server health: "\ncurl -s http://localhost:8089/health && echo " (OK)" || echo " (FAIL)"\n\necho -n "Admin server health: "\ncurl -s http://localhost:8081/health && echo " (OK)" || echo " (FAIL)"\n\necho "Done."

@@ -1,0 +1,49 @@
+version: '3.9'
+
+services:
+  # Database service
+  db:
+    image: postgres:15-alpine
+    container_name: job_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jobuser
+      POSTGRES_DB: jobsdb
+      POSTGRES_PASSWORD: jobuser_password
+      TZ: Asia/Tehran
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../migrations:/docker-entrypoint-migrations
+      - ../init-db:/docker-entrypoint-initdb.d
+    networks:
+      - scraper-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobuser -d jobsdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "5432:5432"
+
+  # Test Server (simplified version for testing)
+  test:
+    image: python:3.10-slim
+    container_name: job_test
+    restart: unless-stopped
+    volumes:
+      - ..:/app
+    working_dir: /app
+    command: bash -c "pip install fastapi uvicorn && python3 test_server.py"
+    networks:
+      - scraper-network
+    ports:
+      - "8089:8089"
+
+volumes:
+  postgres_data:
+    name: job_postgres_data
+
+networks:
+  scraper-network:
+    name: job_scraper_network 

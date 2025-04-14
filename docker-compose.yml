@@ -9,7 +9,7 @@ services:
     environment:
       POSTGRES_USER: jobuser
       POSTGRES_DB: jobsdb
-      POSTGRES_PASSWORD: jobuser_password  # Use direct password for simplicity
+      POSTGRES_PASSWORD: jobuser_password
       TZ: Asia/Tehran
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -36,7 +36,7 @@ services:
         condition: service_healthy
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: admin_password  # Use direct password for simplicity
+      PGADMIN_DEFAULT_PASSWORD: admin_password
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     networks:
@@ -64,9 +64,11 @@ services:
     container_name: job_superset
     restart: unless-stopped
     depends_on:
-      - db
-      - redis
-    command: |
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
       bash -c "superset db upgrade && 
       echo 'admin_password' | superset fab create-admin --username admin --firstname Admin --lastname User --email admin@example.com --password-stdin && 
       superset init && 
@@ -77,9 +79,9 @@ services:
       DB_PORT: 5432
       DB_USER: jobuser
       DB_NAME: jobsdb
-      DB_PASSWORD: jobuser_password  # Use direct password for simplicity
+      DB_PASSWORD: jobuser_password
       REDIS_HOST: redis
-      SUPERSET_SECRET_KEY: superset_secret_key_value  # Use direct value for simplicity
+      SUPERSET_SECRET_KEY: superset_secret_key_value
     volumes:
       - superset_home:/app/superset_home
     networks:
@@ -104,8 +106,8 @@ services:
       DB_PORT: 5432
       DB_USER: jobuser
       DB_NAME: jobsdb
-      DB_PASSWORD: jobuser_password  # Use direct password for simplicity
-      ENABLE_CRON: "true"  # Keep the container running
+      DB_PASSWORD: jobuser_password
+      ENABLE_CRON: "true"
     volumes:
       - ./job_data:/app/data
       - ./config:/app/config
@@ -114,7 +116,7 @@ services:
     networks:
       - scraper-network
     ports:
-      - "8082:8081"  # Changed to 8082 to avoid conflicts with admin dashboard
+      - "8082:8081"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
@@ -122,42 +124,48 @@ services:
       retries: 3
       start_period: 40s
 
-  # Admin Dashboard service
+  # Test Server (simplified version for testing the API)
+  test:
+    image: python:3.10-slim
+    container_name: job_test
+    restart: unless-stopped
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: bash -c "apt-get update && apt-get install -y curl && pip install fastapi uvicorn && python3 test_server.py"
+    networks:
+      - scraper-network
+    ports:
+      - "8089:8089"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8089/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Admin Dashboard
   admin:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: python:3.10-slim
     container_name: job_admin
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      ADMIN_MODE: "true"
-      TZ: Asia/Tehran
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_USER: jobuser
-      DB_NAME: jobsdb
-      DB_PASSWORD: jobuser_password  # Use direct password for simplicity
-      ENABLE_CRON: "true"  # Keep the container running
     volumes:
-      - ./src:/app/src
-      - ./public:/app/public
-      - ./logs:/app/logs
-      - ./config:/app/config
-      - ./scripts:/app/scripts
+      - .:/app
+    working_dir: /app
+    command: bash -c "apt-get update && apt-get install -y curl && pip install -r requirements.txt fastapi uvicorn && python3 run_admin.py"
     networks:
       - scraper-network
     ports:
       - "8081:8081"
-    command: python3 -m uvicorn src.main:app --host 0.0.0.0 --port 8081 --log-level debug
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 40s
+      start_period: 10s
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   postgres_data:
@@ -169,4 +177,4 @@ volumes:
 
 networks:
   scraper-network:
-    name: job_scraper_network
+    name: job_scraper_network 
