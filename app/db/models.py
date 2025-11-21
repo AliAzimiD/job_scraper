@@ -48,7 +48,9 @@ class Job(Base):
     source_website = Column(String(100), nullable=False)
     still_active = Column(Boolean, default=True)
     last_check_date = Column(DateTime)
-    metadata = Column(JSON)
+    # 'metadata' is a reserved attribute name on declarative models (SQLAlchemy).
+    # Map the DB column named 'metadata' to a safe attribute name `job_metadata`.
+    job_metadata = Column('metadata', JSON)
     
     # Relationships
     tags = relationship("Tag", secondary=job_tags, back_populates="jobs")
@@ -94,7 +96,8 @@ class Job(Base):
             'source_website': self.source_website,
             'still_active': self.still_active,
             'last_check_date': self.last_check_date.isoformat() if self.last_check_date else None,
-            'tags': [tag.name for tag in self.tags] if self.tags else []
+            'tags': [tag.name for tag in self.tags] if self.tags else [],
+            'metadata': self.job_metadata
         }
     
     def __repr__(self) -> str:

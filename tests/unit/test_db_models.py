@@ -54,7 +54,7 @@ class TestDatabaseModels(unittest.TestCase):
             posted_date=datetime.now(),
             source_website='example.com',
             still_active=True,
-            metadata={'skills': ['Python', 'Flask', 'SQL']}
+            job_metadata={'skills': ['Python', 'Flask', 'SQL']}
         )
         
         # Add job to session and commit
@@ -70,7 +70,7 @@ class TestDatabaseModels(unittest.TestCase):
         self.assertEqual(queried_job.company, 'Test Company')
         self.assertTrue(queried_job.remote)
         self.assertEqual(queried_job.salary_currency, 'USD')
-        self.assertEqual(queried_job.metadata['skills'], ['Python', 'Flask', 'SQL'])
+        self.assertEqual(queried_job.job_metadata['skills'], ['Python', 'Flask', 'SQL'])
     
     def test_job_to_dict_method(self):
         """Test Job model to_dict method."""
